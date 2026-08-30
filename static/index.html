@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>总控台</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<aside class="rail">
+  <div class="rail-logo" title="总控台">✦</div>
+  <nav class="rail-nav">
+    <button class="rail-btn active" data-view="launchpad" title="启动台">
+      <svg viewBox="0 0 24 24" width="18" height="18"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" fill="currentColor"/></svg>
+      <span>启动台</span>
+    </button>
+    <button class="rail-btn" data-view="monitor" title="服务监控">
+      <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 13h6V4H4v9zm10 7h6v-9h-6v9zM4 20h6v-4H4v4zm10-13h6V4h-6v3z" fill="currentColor"/></svg>
+      <span>服务监控</span>
+    </button>
+    <button class="rail-btn" data-view="inventory" title="盘点">
+      <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 2 4 6v6c0 5 3.4 8.3 8 10 4.6-1.7 8-5 8-10V6l-8-4zm0 6a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z" fill="currentColor"/></svg>
+      <span>盘点</span>
+    </button>
+    <button class="rail-btn" data-action="logcenter" title="日志中心 (Ctrl+J)">
+      <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 5h16v2H4zm0 4h16v2H4zm0 4h10v2H4zm0 4h10v2H4z" fill="currentColor"/></svg>
+      <span>日志</span>
+    </button>
+  </nav>
+  <div class="rail-foot">
+    <span class="dot" id="conn-dot" title="连接状态"></span>
+    <span id="rail-port">127.0.0.1:—</span>
+  </div>
+</aside>
+
+<div class="shell">
+  <div id="conn-banner" class="conn-banner hidden">⚠ 连接已断开，正在重连… 页面将在恢复后自动继续刷新</div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">✦</span>
+      <div>
+        <div class="brand-name">总控台</div>
+        <div class="brand-sub">本地服务与批处理工具 · 快速启动</div>
+      </div>
+    </div>
+    <div class="topbar-mid" id="top-summary">运行中 — · 服务 —</div>
+    <div class="topbar-right">
+      <span class="badge" id="poll-badge" title="刷新间隔">—</span>
+      <button id="palette-btn" class="ghost" title="命令面板 (Ctrl+K)">搜索 <kbd>Ctrl K</kbd></button>
+      <button id="logcenter-btn" class="ghost" title="日志中心 (Ctrl+J)">日志 <kbd>Ctrl J</kbd></button>
+      <button id="console-restart-btn" class="ghost" title="重启总控台服务（不影响已运行的命令单元）">重启</button>
+      <button id="console-stop-btn" class="ghost danger-text" title="停止总控台服务（不影响已运行的命令单元）">停止</button>
+      <button id="theme-btn" class="ghost" title="主题：浅色 / 深色 / 跟随系统">主题</button>
+    </div>
+  </header>
+
+  <main class="content">
+    <!-- ============ 启动台 ============ -->
+    <section id="view-launchpad" class="view active">
+      <div class="hero">
+        <div class="hero-text">
+          <div class="eyebrow">LAUNCHPAD</div>
+          <h1>启动台</h1>
+          <div class="hero-sub">一键启动与管理保存的服务与批处理任务</div>
+        </div>
+        <div class="hero-actions">
+          <button id="add-service-btn" class="primary">+ 添加服务</button>
+          <button id="add-task-btn" class="outline">+ 添加任务</button>
+          <button id="refresh-btn" class="outline">刷新状态</button>
+        </div>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat"><span class="stat-icon ic-blue">▦</span><div><div class="stat-value" id="stat-units">—</div><div class="stat-label">应用总数 · 保存的命令</div></div></div>
+        <div class="stat"><span class="stat-icon ic-green">▶</span><div><div class="stat-value" id="stat-running">—</div><div class="stat-label">运行中 · 受控进程</div></div></div>
+        <div class="stat"><span class="stat-icon ic-purple">▤</span><div><div class="stat-value" id="stat-tasks">—</div><div class="stat-label">批处理任务</div></div></div>
+        <div class="stat"><span class="stat-icon ic-orange">◉</span><div><div class="stat-value" id="stat-proj-ports">—</div><div class="stat-label">项目端口</div></div></div>
+        <div class="stat"><span class="stat-icon ic-cyan">◔</span><div><div class="stat-value" id="stat-cpu">—</div><div class="stat-label">总 CPU · 负载</div></div></div>
+        <div class="stat"><span class="stat-icon ic-pink">▥</span><div><div class="stat-value" id="stat-mem">—</div><div class="stat-label">总内存</div></div></div>
+      </div>
+
+      <div class="cols">
+        <div class="col-main">
+          <div class="section-head">
+            <span class="section-tag"></span>
+            <span class="section-title">SERVICES · 服务</span>
+            <span class="section-count" id="svc-count">0</span>
+            <div class="filter-tabs" id="svc-filters">
+              <button data-f="all" class="active">全部 <b id="f-all"></b></button>
+              <button data-f="running">运行中 <b id="f-running"></b></button>
+              <button data-f="stopped">已停止 <b id="f-stopped"></b></button>
+              <button data-f="exited">异常 <b id="f-exited"></b></button>
+            </div>
+          </div>
+          <div class="cards" id="service-cards"></div>
+
+          <div class="section-head">
+            <span class="section-tag"></span>
+            <span class="section-title">TASKS · 批处理任务</span>
+            <span class="section-count" id="task-count">0</span>
+            <div class="filter-tabs" id="task-filters">
+              <button data-f="all" class="active">全部 <b id="tf-all"></b></button>
+              <button data-f="running">运行中 <b id="tf-running"></b></button>
+              <button data-f="stopped">已停止 <b id="tf-stopped"></b></button>
+              <button data-f="exited">已结束 <b id="tf-exited"></b></button>
+            </div>
+          </div>
+          <div class="cards" id="task-cards"></div>
+        </div>
+
+        <aside class="col-side">
+          <div class="side-card">
+            <div class="side-head">实时动态<button class="mini" id="feed-clear">清空</button></div>
+            <div class="feed" id="feed"></div>
+          </div>
+          <div class="side-card">
+            <div class="side-head">端口占用 TOP5</div>
+            <div class="side-list" id="side-ports"></div>
+          </div>
+          <div class="side-card">
+            <div class="side-head">快捷操作</div>
+            <div class="quick">
+              <button id="q-stop-all">批量停止服务</button>
+              <button id="q-refresh">刷新所有状态</button>
+            </div>
+          </div>
+          <div class="side-card tip">
+            <div class="side-head">小贴士</div>
+            <div class="tip-body">绿色为运行中。停止按钮会结束整棵进程树，且仅对总控台启动的进程生效（PID 身份校验）。</div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ============ 服务监控 ============ -->
+    <section id="view-monitor" class="view">
+      <div class="hero">
+        <div class="hero-text">
+          <div class="eyebrow">SERVICES</div>
+          <h1>服务监控</h1>
+          <div class="hero-sub">实时掌握项目端口与进程负载</div>
+        </div>
+        <div class="hero-actions">
+          <button id="mon-refresh-btn" class="outline">刷新状态</button>
+        </div>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat"><span class="stat-icon ic-green">◈</span><div><div class="stat-value" id="stat-mysvc">—</div><div class="stat-label">我的服务 · 监控中</div></div></div>
+        <div class="stat"><span class="stat-icon ic-orange">◉</span><div><div class="stat-value" id="stat-port">—</div><div class="stat-label">项目端口</div></div></div>
+        <div class="stat"><span class="stat-icon ic-cyan">◔</span><div><div class="stat-value" id="stat-cpu-m">—</div><div class="stat-label">总 CPU</div></div></div>
+        <div class="stat"><span class="stat-icon ic-pink">▥</span><div><div class="stat-value" id="stat-mem-m">—</div><div class="stat-label">总内存</div></div></div>
+        <div class="stat"><span class="stat-icon ic-red">⚠</span><div><div class="stat-value" id="stat-warn">0</div><div class="stat-label">端口警告</div></div></div>
+        <div class="stat"><span class="stat-icon ic-blue">⊙</span><div><div class="stat-value" id="stat-ts">—</div><div class="stat-label">最后更新 · 实时刷新</div></div></div>
+      </div>
+
+      <div class="cols">
+        <div class="col-main">
+          <div id="new-ports" class="new-ports hidden"></div>
+          <div class="section-head">
+            <span class="section-tag"></span>
+            <span class="section-title">PROJECT PORTS · 项目端口</span>
+            <span class="section-count" id="proj-port-count">0</span>
+          </div>
+          <div class="panel-strip">
+            <table class="data-table" id="project-ports-table">
+              <thead><tr><th>服务</th><th>地址</th><th>归属</th><th>来源</th><th>CPU%</th><th>时长</th><th>操作</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="section-head" id="other-ports-head">
+            <span class="section-tag"></span>
+            <span class="section-title">OTHER PORTS · 其他端口</span>
+            <span class="section-count" id="other-port-count">0</span>
+            <button class="mini" id="other-ports-toggle">展开</button>
+          </div>
+          <div class="panel-strip hidden" id="other-ports-body">
+            <table class="data-table" id="other-ports-table">
+              <thead><tr><th>地址</th><th>协议</th><th>进程</th><th>PID</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="section-head">
+            <span class="section-tag"></span>
+            <span class="section-title">PROCESSES · 进程</span>
+          </div>
+          <div class="panel-strip">
+            <input id="proc-filter" class="search" placeholder="按名称 / PID / 命令行过滤">
+            <div class="table-scroll">
+              <table class="data-table" id="procs-table">
+                <thead><tr><th>进程</th><th>PID</th><th>CPU%</th><th>内存</th><th>状态</th><th>时长</th><th>用户</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <aside class="col-side">
+          <div class="side-card">
+            <div class="side-head">实时告警</div>
+            <div class="side-body" id="alerts">运行良好，暂无告警</div>
+          </div>
+          <div class="side-card">
+            <div class="side-head">端口占用 TOP5</div>
+            <div class="side-list" id="side-ports-m"></div>
+          </div>
+          <div class="side-card">
+            <div class="side-head">资源占用 TOP5
+              <div class="mini-tabs"><button id="res-tab-cpu" class="active">CPU</button><button id="res-tab-mem">内存</button></div>
+            </div>
+            <div class="side-list" id="side-resources"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ============ 盘点 ============ -->
+    <section id="view-inventory" class="view">
+      <div class="hero">
+        <div class="hero-text">
+          <div class="eyebrow">INVENTORY</div>
+          <h1>盘点</h1>
+          <div class="hero-sub">已安装的 Agent 工具与本地项目目录</div>
+        </div>
+        <div class="hero-actions">
+          <button id="refresh-inv-btn" class="primary">刷新盘点</button>
+          <span class="hero-note" id="inv-scanned"></span>
+        </div>
+      </div>
+
+      <div class="cols">
+        <div class="col-main">
+          <div class="panel">
+            <div class="side-head">AGENTS · Agent 工具<span class="side-note">CLI 型 AI 编程代理 · 登录态仅判定凭据文件存在性</span></div>
+            <table class="data-table" id="agents-table">
+              <thead><tr><th>名称</th><th>版本</th><th>安装路径</th><th>配置目录</th><th>登录态</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="panel">
+            <div class="side-head">PROJECTS · 项目<span class="side-note">只读识别，不安装依赖、不执行代码</span></div>
+            <table class="data-table" id="projects-table">
+              <thead><tr><th>路径</th><th>类型</th><th>候选命令</th><th>操作</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <aside class="col-side">
+          <div class="side-card">
+            <div class="side-head">设置</div>
+            <div class="setting-block">
+              <label>扫描根（自动扫描的目录）</label>
+              <div id="scan-roots" class="chips"></div>
+              <div class="inline-form">
+                <input id="new-root-input" placeholder="如 E:\项目">
+                <button id="add-root-btn" class="outline">添加</button>
+              </div>
+            </div>
+            <div class="setting-block">
+              <label>刷新间隔（秒）</label>
+              <input id="poll-input" type="number" min="1" max="300">
+            </div>
+            <div class="setting-block">
+              <label>任务完成通知（浏览器通知）</label>
+              <label class="switch-row"><input id="notify-toggle" type="checkbox"> 退出时弹系统通知</label>
+            </div>
+            <div class="setting-block" id="ignored-ports-block">
+              <label>已忽略端口（服务监控不再显示）</label>
+              <div id="ignored-ports" class="chips"></div>
+            </div>
+            <button id="save-settings-btn" class="primary">保存设置</button>
+          </div>
+        </aside>
+      </div>
+    </section>
+  </main>
+</div>
+
+<aside id="log-drawer" class="hidden">
+  <div class="drawer-head">
+    <span id="log-title">日志</span>
+    <span class="drawer-hint">每 3 秒自动刷新</span>
+    <button id="log-close" class="ghost" title="关闭">×</button>
+  </div>
+  <pre id="log-body"></pre>
+</aside>
+
+<dialog id="unit-dialog">
+  <form method="dialog" id="unit-form">
+    <h3 id="unit-dialog-title">添加命令</h3>
+    <div class="form-row">
+      <label>从项目选择（自动填工作目录与候选命令）</label>
+      <select id="unit-project-select"><option value="">— 手动填写 —</option></select>
+    </div>
+    <div class="form-row">
+      <label>名称</label>
+      <input id="unit-name" required placeholder="如 web-dev">
+    </div>
+    <div class="form-row inline">
+      <label><input type="radio" name="unit-kind" value="service" checked> 服务（长期运行）</label>
+      <label><input type="radio" name="unit-kind" value="task"> 任务（一次执行）</label>
+    </div>
+    <div class="form-row">
+      <label>命令（PowerShell）</label>
+      <textarea id="unit-command" rows="3" required></textarea>
+      <div id="unit-candidates" class="chips"></div>
+    </div>
+    <div class="form-row">
+      <label>工作目录</label>
+      <input id="unit-workdir" placeholder="项目目录或留空">
+    </div>
+    <div class="form-actions">
+      <button type="button" id="unit-cancel" class="ghost">取消</button>
+      <button type="submit" class="primary" id="unit-save">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="palette" class="palette-dialog">
+  <div class="palette-box">
+    <input id="palette-input" placeholder="搜索命令单元、跳转页面、执行操作…" autocomplete="off">
+    <div id="palette-list" class="palette-list"></div>
+    <div class="palette-hint"><kbd>↑</kbd><kbd>↓</kbd> 选择 · <kbd>Enter</kbd> 执行 · <kbd>Esc</kbd> 关闭</div>
+  </div>
+</dialog>
+
+<aside id="logcenter" class="hidden">
+  <div class="drawer-head">
+    <span>日志中心</span>
+    <span class="drawer-hint">点左侧单元切换 · 每 3 秒自动刷新</span>
+    <button id="logcenter-close" class="ghost" title="关闭">×</button>
+  </div>
+  <div class="logcenter-body">
+    <div id="lc-list" class="lc-list"></div>
+    <pre id="lc-body" class="lc-body"></pre>
+  </div>
+</aside>
+
+<dialog id="diag-dialog">
+  <h3 id="diag-title">诊断</h3>
+  <div id="diag-body" class="diag-body"></div>
+  <div class="form-actions">
+    <button type="button" id="diag-edit" class="outline hidden">编辑命令</button>
+    <button type="button" id="diag-close" class="ghost">关闭</button>
+  </div>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

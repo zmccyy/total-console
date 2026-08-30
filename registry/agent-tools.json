@@ -1,0 +1,69 @@
+{
+  "_comment": "Agent 工具注册表：盘点引擎按条目探测本机安装的 CLI 型 AI 编程代理。变更新增条目即可扩展，无需改代码。version_args 为版本探测命令（cmd /c 执行，5s 超时）；credential_files 仅判断存在性，绝不读取内容。",
+  "agents": [
+    {
+      "id": "claude",
+      "name": "Claude Code",
+      "binary": "claude",
+      "version_args": ["claude", "--version"],
+      "config_dir": ".claude",
+      "credential_files": [".claude/.credentials.json", ".claude.json"]
+    },
+    {
+      "id": "codex",
+      "name": "Codex CLI",
+      "binary": "codex",
+      "version_args": ["codex", "--version"],
+      "config_dir": ".codex",
+      "credential_files": [".codex/auth.json"]
+    },
+    {
+      "id": "qwen-code",
+      "name": "Qwen Code",
+      "binary": "qwen",
+      "version_args": ["qwen", "--version"],
+      "config_dir": ".qwen",
+      "credential_files": []
+    },
+    {
+      "id": "aider",
+      "name": "Aider",
+      "binary": "aider",
+      "version_args": ["aider", "--version"],
+      "config_dir": ".aider",
+      "credential_files": []
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini CLI",
+      "binary": "gemini",
+      "version_args": ["gemini", "--version"],
+      "config_dir": ".gemini",
+      "credential_files": [".gemini/oauth_creds.json"]
+    },
+    {
+      "id": "github-copilot",
+      "name": "GitHub Copilot CLI",
+      "binary": "copilot",
+      "version_args": ["copilot", "--version"],
+      "config_dir": ".config/github-copilot",
+      "credential_files": [".config/github-copilot/hosts.json"]
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "binary": "opencode",
+      "version_args": ["opencode", "--version"],
+      "config_dir": ".config/opencode",
+      "credential_files": []
+    },
+    {
+      "id": "amp",
+      "name": "Amp",
+      "binary": "amp",
+      "version_args": ["amp", "--version"],
+      "config_dir": ".amp",
+      "credential_files": [".amp/auth.json"]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 工作区插件缓存
+.v2c/
+
+# 运行时产物（数据默认在 %APPDATA%\总控台，不进仓库）
+*.log
+config.json
+config.json.bak
