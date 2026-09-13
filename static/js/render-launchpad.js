@@ -51,6 +51,10 @@ function unitCard(u) {
         (running
           ? '<button class="icon-btn act-restart" data-id="' + esc(u.id) + '" title="重启">↻</button>'
           : "") +
+        (u.workdir
+          ? '<button class="icon-btn act-open-terminal" data-id="' + esc(u.id) + '" title="在终端打开工作目录">❯</button>' +
+            '<button class="icon-btn act-open-editor" data-id="' + esc(u.id) + '" title="在编辑器打开工作目录">⌨</button>'
+          : "") +
         '<button class="icon-btn act-edit" data-id="' + esc(u.id) + '" title="编辑">✎</button>' +
         '<button class="icon-btn act-del" data-id="' + esc(u.id) + '" title="删除">×</button>' +
       "</div>" +

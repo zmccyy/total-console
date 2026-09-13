@@ -172,6 +172,14 @@ async function consoleAction(action, confirmText) {
   }
 }
 
+// 在终端 / 编辑器打开单元工作目录（卡片按钮与命令面板共用）
+export async function openUnitTool(unitId, action, name) {
+  const res = await api("/api/units/" + unitId + "/" + action, { method: "POST" });
+  if (!res.ok) return showError(await res.text());
+  const result = await res.json();
+  pushFeed((result.feed || "已打开") + " <b>" + esc(name) + "</b>（" + esc(result.tool || "") + "）");
+}
+
 function handleClick(e) {
   const t = e.target;
 
@@ -214,6 +222,18 @@ function handleClick(e) {
 
   const diagBtn = t.closest(".act-diag") || t.closest(".health-chip");
   if (diagBtn) return openDiagnose(diagBtn.dataset.id);
+
+  const openTerm = t.closest(".act-open-terminal");
+  if (openTerm) {
+    const u = state.snap.units.find((x) => x.id === openTerm.dataset.id);
+    return openUnitTool(openTerm.dataset.id, "open-terminal", u ? u.name : "");
+  }
+
+  const openEdit = t.closest(".act-open-editor");
+  if (openEdit) {
+    const u = state.snap.units.find((x) => x.id === openEdit.dataset.id);
+    return openUnitTool(openEdit.dataset.id, "open-editor", u ? u.name : "");
+  }
 
   const restartBtn = t.closest(".act-restart");
   if (restartBtn) {

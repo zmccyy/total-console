@@ -264,6 +264,8 @@ def main():
         status, _ = req("POST", "/api/open-url", port, token=token,
                         body={"url": "file:///C:/Windows"})
         check("open-url 拒绝非 http(s) 400", status == 400, "status=%s" % status)
+        status, _ = req("POST", "/api/units/zzz/open-terminal", port, token=token)
+        check("open-terminal 未知单元 404", status == 404, "status=%s" % status)
     finally:
         # 清理：先停掉可能在跑的单元再关服务器，避免 Windows 日志句柄残留
         try:

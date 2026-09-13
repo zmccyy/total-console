@@ -2,6 +2,7 @@
 import { state } from "./state.js";
 import { $, esc, switchView, applyHtml } from "./util.js";
 import { unitAction, refreshSnapshot } from "./actions.js";
+import { openUnitTool } from "./handlers.js";
 import { openLog, openLogCenter } from "./render-logs.js";
 import { openUnitDialog, openDiagnose } from "./dialogs.js";
 import { nextTheme, THEME_LABEL } from "./theme.js";
@@ -27,6 +28,12 @@ export function buildPaletteItems() {
       action: () => openLog(u.id, u.name) });
     items.push({ label: "诊断 " + u.name, hint: kindZh, keywords: "diagnose",
       action: () => openDiagnose(u.id) });
+    if (u.workdir) {
+      items.push({ label: "在终端打开 " + u.name, hint: u.workdir, keywords: "terminal cmd",
+        action: () => openUnitTool(u.id, "open-terminal", u.name) });
+      items.push({ label: "在编辑器打开 " + u.name, hint: u.workdir, keywords: "editor vscode code",
+        action: () => openUnitTool(u.id, "open-editor", u.name) });
+    }
   }
   items.push({ label: "启动台", hint: "页面", keywords: "launchpad view",
     action: () => switchView("launchpad") });

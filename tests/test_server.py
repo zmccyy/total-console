@@ -300,6 +300,45 @@ class ServerIntegrationTest(unittest.TestCase):
                                      headers=self.auth_headers())
             self.assertEqual(status, 400, bad)
 
+    # ---------- 终端 / 编辑器打开 ----------
+
+    def test_open_terminal_on_unit(self):
+        import unittest.mock as mock
+        h = self.auth_headers()
+        _, data = self.request("POST", "/api/units",
+                               body=json.dumps({"name": "openterm", "kind": "service",
+                                                "command": "echo 1",
+                                                "workdir": str(Path(__file__).parent)}),
+                               headers=h)
+        uid = json.loads(data)["id"]
+        with mock.patch("core.integrations.open_terminal", return_value={"tool": "wt"}) as m:
+            status, data = self.request("POST", "/api/units/%s/open-terminal" % uid, headers=h)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(data)["tool"], "wt")
+        self.assertEqual(m.call_count, 1)
+
+    def test_open_editor_missing_workdir_400(self):
+        import unittest.mock as mock
+        from core import integrations
+        h = self.auth_headers()
+        _, data = self.request("POST", "/api/units",
+                               body=json.dumps({"name": "badwd", "kind": "service",
+                                                "command": "echo 1", "workdir": "Z:\\不存在的目录\\xyz"}),
+                               headers=h)
+        uid = json.loads(data)["id"]
+        status, _ = self.request("POST", "/api/units/%s/open-editor" % uid, headers=h)
+        self.assertEqual(status, 400)
+        # open_terminal 的参数解析同路径：目录不存在直接 400，不真正开窗
+        with mock.patch.object(integrations.subprocess, "Popen") as p:
+            with self.assertRaises(integrations.OpenError):
+                integrations.open_terminal("Z:\\不存在的目录\\xyz")
+            p.assert_not_called()
+
+    def test_open_tool_unknown_unit_404(self):
+        status, _ = self.request("POST", "/api/units/zzz/open-terminal",
+                                 headers=self.auth_headers())
+        self.assertEqual(status, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

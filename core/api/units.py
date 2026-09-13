@@ -1,5 +1,5 @@
-"""命令单元：CRUD / 排序 / 生命周期 / 认领 / 诊断 / 日志。"""
-from .. import diagnose, launchpad
+"""命令单元：CRUD / 排序 / 生命周期 / 认领 / 诊断 / 日志 / 外部工具。"""
+from .. import diagnose, integrations, launchpad
 from . import Route
 from .common import ApiContext
 
@@ -93,8 +93,16 @@ def unit_claim(ctx: ApiContext):
 
 def unit_lifecycle(ctx: ApiContext):
     action = ctx.params["action"]
-    if action not in ("start", "stop", "restart"):
-        return ctx.send_text(404, "Not Found")
+    if action in ("start", "stop", "restart"):
+        return _lifecycle(ctx, action)
+    if action == "open-terminal":
+        return _open_with(ctx, integrations.open_terminal, "已在终端打开工作目录")
+    if action == "open-editor":
+        return _open_with(ctx, integrations.open_editor, "已在编辑器打开工作目录")
+    return ctx.send_text(404, "Not Found")
+
+
+def _lifecycle(ctx: ApiContext, action):
     unit_id = ctx.params["unit_id"]
     try:
         if action == "start":
@@ -112,6 +120,20 @@ def unit_lifecycle(ctx: ApiContext):
     except launchpad.Error as e:
         return ctx.send_text(500, str(e))
     ctx.send_json(200, unit)
+
+
+def _open_with(ctx: ApiContext, opener, ok_feed):
+    unit_id = ctx.params["unit_id"]
+    try:
+        unit = ctx.app.launchpad.get_unit(unit_id)
+    except launchpad.UnitNotFoundError:
+        return ctx.send_text(404, "单元不存在")
+    try:
+        result = opener(unit.get("workdir") or "")
+    except integrations.OpenError as e:
+        return ctx.send_text(400, str(e))
+    result["feed"] = ok_feed
+    ctx.send_json(200, result)
 
 
 def unit_logs(ctx: ApiContext):
