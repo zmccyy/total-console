@@ -3,6 +3,14 @@ import { api, getJSON } from "./api.js";
 import { state } from "./state.js";
 import { $, esc, applyHtml } from "./util.js";
 
+// Git 分支徽章（脏 = 橙色带 *，干净 = 绿色）
+export function gitBadge(p) {
+  if (!p.git_branch) return "";
+  return '<span class="tag ' + (p.git_dirty ? "git-dirty" : "git-clean") + '" title="' +
+    (p.git_dirty ? "有未提交改动" : "工作区干净") + '">⎇ ' + esc(p.git_branch) +
+    (p.git_dirty ? " *" : "") + "</span>";
+}
+
 export function renderInventory() {
   const inv = state.inv;
   if (!inv) return;
@@ -18,7 +26,7 @@ export function renderInventory() {
   applyHtml($("#projects-table tbody"), (inv.projects || []).map((p, idx) =>
     "<tr>" +
     '<td class="mono cmd" title="' + esc(p.path) + '">' + esc(p.path) + "</td>" +
-    "<td>" + esc(p.type) + (p.has_git ? " · git" : "") + "</td>" +
+    "<td>" + esc(p.type) + (p.has_git ? " · git" : "") + " " + gitBadge(p) + "</td>" +
     "<td>" + p.candidates.map((c) =>
       '<button class="chip add-candidate" data-idx="' + idx + '" data-cmd="' + esc(c.command) + '">' + esc(c.label) + "</button>"
     ).join("") + "</td>" +

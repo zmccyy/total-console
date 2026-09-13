@@ -96,6 +96,8 @@ class DiagnoseTest(unittest.TestCase):
         hint = diagnose.install_deps_hint({"workdir": str(self.dir)})
         self.assertIsNotNone(hint)
         self.assertIn("npm install", hint)
+        self.assertNotIn("&&", hint)  # 总控台用 PowerShell 5.x 执行，&& 会解析失败
+        self.assertIn("Set-Location", hint)
         self.assertIsNone(diagnose.install_deps_hint({"workdir": ""}))
 
     def test_env_file_missing_warns_not_blocking(self):

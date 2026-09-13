@@ -1,5 +1,6 @@
 import json
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -102,6 +103,36 @@ class ProjectScanTest(unittest.TestCase):
         projects = inventory.scan_projects([self.root, other])
         paths = {p["path"] for p in projects}
         self.assertIn(str(other / "foo"), paths)
+
+    @unittest.skipUnless(shutil.which("git"), "需要已安装 git")
+    def test_git_info_branch_and_dirty(self):
+        repo = self.root / "gitrepo"
+        write(repo, ".", {"pyproject.toml": ""})
+        def git(*args):
+            subprocess.run(["git", "-C", str(repo), *args], check=True,
+                           capture_output=True, text=True, timeout=15)
+        git("init", "-b", "main")
+        git("config", "user.email", "t@t.local")
+        git("config", "user.name", "t")
+        git("add", ".")
+        git("commit", "-m", "init")
+        projects = inventory.scan_projects([self.root])
+        p = next(x for x in projects if x["path"] == str(repo))
+        self.assertEqual(p["git_branch"], "main")
+        self.assertFalse(p["git_dirty"])
+        (repo / "extra.txt").write_text("dirty", encoding="utf-8")
+        projects = inventory.scan_projects([self.root])
+        p = next(x for x in projects if x["path"] == str(repo))
+        self.assertEqual(p["git_branch"], "main")
+        self.assertTrue(p["git_dirty"])
+
+    def test_git_info_non_repo_returns_none(self):
+        d = self.root / "plain"
+        d.mkdir()
+        if shutil.which("git"):
+            branch, dirty = inventory.git_info(d)
+            self.assertIsNone(branch)
+            self.assertIsNone(dirty)
 
 
 class MatchProjectTest(unittest.TestCase):

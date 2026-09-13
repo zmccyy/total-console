@@ -10,9 +10,37 @@ EXCLUDED_DIRS = {
     "target", ".hg", ".svn", "Local Settings", "Application Data",
 }
 MAX_DEPTH = 3
+GIT_TIMEOUT = 4  # 单个 git 只读查询超时秒数
 
 _NODE_SCRIPT_ORDER = ("dev", "start", "serve")
 _TYPE_PRIORITY = ("node", "python", "go", "rust", "docker", "static", "git")
+
+
+def git_info(path):
+    """只读查询项目 git 分支与脏状态 → (branch|None, dirty|None)。
+
+    git 未安装、目录非仓库或查询失败一律返回 (None, None)，绝不写入。
+    CREATE_NO_WINDOW 防止后台线程弹控制台窗口。
+    """
+    if not shutil.which("git"):
+        return None, None
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        branch = subprocess.run(
+            ["git", "-C", str(path), "branch", "--show-current"],
+            capture_output=True, text=True, timeout=GIT_TIMEOUT,
+            stdin=subprocess.DEVNULL, creationflags=no_window,
+        )
+        status = subprocess.run(
+            ["git", "-C", str(path), "status", "--porcelain"],
+            capture_output=True, text=True, timeout=GIT_TIMEOUT,
+            stdin=subprocess.DEVNULL, creationflags=no_window,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None, None
+    if branch.returncode != 0:
+        return None, None
+    return (branch.stdout.strip() or None), bool(status.stdout.strip())
 
 
 def scan_projects(roots, max_depth=MAX_DEPTH):
@@ -32,13 +60,16 @@ def scan_projects(roots, max_depth=MAX_DEPTH):
             type_, markers, has_git = markers
             if type_ is None:
                 continue
-            projects.append({
+            project = {
                 "path": key,
                 "type": type_,
                 "markers": markers,
                 "has_git": has_git,
                 "candidates": _candidates(type_, dir_path),
-            })
+            }
+            if has_git:
+                project["git_branch"], project["git_dirty"] = git_info(dir_path)
+            projects.append(project)
     projects.sort(key=lambda p: p["path"])
     return projects
 

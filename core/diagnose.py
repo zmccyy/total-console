@@ -232,4 +232,5 @@ def install_deps_hint(unit):
     mgr = ("yarn" if (Path(cwd) / "yarn.lock").is_file()
            else "pnpm" if (Path(cwd) / "pnpm-lock.yaml").is_file()
            else "npm")
-    return "cd \"%s\" && %s install" % (cwd, mgr)
+    # 总控台用 Windows PowerShell 5.x 执行命令，不支持 && 分隔符，用 ;
+    return "Set-Location -LiteralPath \"%s\"; %s install" % (cwd, mgr)

@@ -105,7 +105,11 @@ class Launchpad:
         # config 传入时共享受调用方持有的配置对象（服务端与设置读写共用一份，避免分叉）
         self.config = config if config is not None else store.load_config(data_dir)
         self._procs = {}
-        self._powershell = shutil.which("powershell") or shutil.which("pwsh") or "powershell.exe"
+        # 优先 PowerShell 7（pwsh：支持 && 等新语法、默认 UTF-8），
+        # 未安装再回退 Windows PowerShell 5.1
+        self._powershell = (shutil.which("pwsh") or shutil.which("powershell")
+                            or "powershell.exe")
+        self._shell_name = Path(self._powershell).stem.lower()
 
     # ---------- 查询 ----------
 
@@ -256,7 +260,8 @@ class Launchpad:
                 raise AlreadyRunningError("单元已在运行")
             token = secrets.token_urlsafe(16)
             log = self._open_log_append(unit_id)
-            log.write(("\n===== 启动 %s =====\n" % time.strftime("%Y-%m-%d %H:%M:%S")).encode("utf-8"))
+            log.write(("\n===== 启动 %s（%s）=====\n"
+                       % (time.strftime("%Y-%m-%d %H:%M:%S"), self._shell_name)).encode("utf-8"))
             log.flush()
             # 运行令牌以 PowerShell 注释形式追加：命令行可校验归属，
             # 溯源引擎据此把受管进程标记为「总控台」启动，且不影响执行语义。

@@ -1,8 +1,15 @@
 // 服务监控：端口表 / 进程表 / 新端口提醒 / 侧栏榜单
 import { state } from "./state.js";
 import { $, esc, fmtMem, fmtUptime, STATUS_ZH, baseName, httpUrlFor, isTcp, managedUnitForPid, applyHtml } from "./util.js";
+import { gitBadge } from "./render-inventory.js";
 
 export const ORIGIN_ICONS = { bot: "🤖", code: "⌨", terminal: "▸", rocket: "🚀", server: "▦", package: "▣" };
+
+// 项目路径 → 盘点缓存中的分支徽章（无缓存/非 git 项目返回空）
+function projectBranchBadge(path) {
+  const proj = ((state.inv && state.inv.projects) || []).find((x) => x.path === path);
+  return proj ? " " + gitBadge(proj) : "";
+}
 
 export function renderProjectPorts(snap, projPorts) {
   const visible = projPorts.filter((p) => !p.isNew);
@@ -17,7 +24,7 @@ export function renderProjectPorts(snap, projPorts) {
     const proc = procCpu[p.pid];
     const origin = unit
       ? '<span class="tag managed">已管理 · ' + esc(unit.name) + "</span>"
-      : '<span class="tag project">项目 · ' + esc(baseName(p.project)) + "</span>";
+      : '<span class="tag project">项目 · ' + esc(baseName(p.project)) + "</span>" + projectBranchBadge(p.project);
     const originTag = p.origin_label
       ? '<span class="tag origin origin-' + esc(p.origin_label.icon) + '" title="启动者溯源">' +
         esc(ORIGIN_ICONS[p.origin_label.icon] || "▸") + " " + esc(p.origin_label.label) + "</span>"

@@ -66,6 +66,14 @@ export async function openDiagnose(unitId) {
   if (!res.ok) { $("#diag-body").innerHTML = '<div class="diag-issue">诊断失败：' + esc(await res.text()) + "</div>"; return; }
   const result = await res.json();
   const issues = result.issues || [];
+  const fixBtn = $("#diag-fix-install");
+  if (result.install_hint) {
+    fixBtn.classList.remove("hidden");
+    fixBtn.dataset.hint = result.install_hint;
+    fixBtn.dataset.workdir = u.workdir || "";
+  } else {
+    fixBtn.classList.add("hidden");
+  }
   $("#diag-body").innerHTML = issues.length
     ? issues.map((i) =>
         '<div class="diag-issue"><div class="diag-title">▸ ' + esc(i.title) + "</div>" +

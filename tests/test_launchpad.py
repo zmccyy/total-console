@@ -3,6 +3,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import psutil
@@ -230,6 +231,20 @@ class LaunchpadTest(unittest.TestCase):
                 break
         log = self.lp.log_tail(u["id"])
         self.assertIn("VAL=hello123", log)
+
+    def test_powershell_preference_pwsh_first(self):
+        """优先 PowerShell 7（pwsh），无 pwsh 时回退 powershell 5.1。"""
+        import shutil as _shutil
+        real_which = _shutil.which
+        with unittest.mock.patch.object(launchpad.shutil, "which",
+                                        side_effect=lambda n: real_which(n)):
+            lp = launchpad.Launchpad(self.data_dir)
+            expected = real_which("pwsh") or real_which("powershell") or "powershell.exe"
+            self.assertEqual(lp._powershell.lower().replace(".exe", ""),
+                             expected.lower().replace(".exe", ""))
+        with unittest.mock.patch.object(launchpad.shutil, "which", return_value=None):
+            lp = launchpad.Launchpad(self.data_dir)
+            self.assertEqual(lp._powershell, "powershell.exe")
 
 
 if __name__ == "__main__":

@@ -127,6 +127,29 @@ export function bind() {
   $("#console-stop-btn").addEventListener("click", () =>
     consoleAction("stop", "停止总控台服务？\n（不会停止启动台里已运行的命令单元，刷新页面可重连若服务仍在运行）"));
   $("#diag-close").addEventListener("click", () => $("#diag-dialog").close());
+  // 依赖一键修复：创建一次性任务执行 install 命令并跳转日志中心观察
+  $("#diag-fix-install").addEventListener("click", async () => {
+    const btn = $("#diag-fix-install");
+    const hint = btn.dataset.hint;
+    const workdir = btn.dataset.workdir || "";
+    if (!hint) return;
+    btn.disabled = true;
+    try {
+      const res = await api("/api/units", { method: "POST", body: {
+        name: (workdir ? workdir.replace(/[\\/]+$/, "").split(/[\\/]/).pop() : "依赖") + " 依赖安装",
+        command: hint, kind: "task", workdir,
+      } });
+      if (!res.ok) { showError(await res.text()); return; }
+      const unit = await res.json();
+      const startRes = await api("/api/units/" + unit.id + "/start", { method: "POST" });
+      if (!startRes.ok) { showError(await startRes.text()); return; }
+      $("#diag-dialog").close();
+      pushFeed("已创建并启动依赖安装任务 <b>" + esc(unit.name) + "</b>");
+      openLogCenter(unit.id);
+    } finally {
+      btn.disabled = false;
+    }
+  });
   $("#diag-edit").addEventListener("click", () => {
     const id = $("#diag-edit").dataset.id;
     $("#diag-dialog").close();
