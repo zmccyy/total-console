@@ -23,7 +23,8 @@ export function bind() {
   $("#mon-refresh-btn").addEventListener("click", refreshSnapshot);
   $("#q-refresh").addEventListener("click", refreshSnapshot);
   $("#q-stop-all").addEventListener("click", async () => {
-    const running = state.snap.units.filter((u) => u.status === "running");
+    const units = (state.snap && state.snap.units) || [];
+    const running = units.filter((u) => u.status === "running");
     if (!running.length) return showError("当前没有运行中的服务");
     if (!confirm("批量停止 " + running.length + " 个运行中的服务？")) return;
     for (const u of running) await unitAction(u.id, "stop");

@@ -140,6 +140,7 @@ class _OpsApp:
                 import traceback
                 traceback.print_exc(file=sys.stderr)
             self._finalize_snapshot(snap)
+            self._record_load_history(snap)
             self.latest_snapshot = snap
             self.broadcast("snapshot", snap)
             try:
@@ -206,7 +207,6 @@ class _OpsApp:
         snap["port_stats"] = port_stats
         self._apply_port_baseline(snap)
         self._mark_watched_and_hidden(snap)
-        self._record_load_history(snap)
 
     def _mark_watched_and_hidden(self, snap):
         """进程关注列表标记（关键字匹配名称/命令行）与隐藏进程过滤。
@@ -225,12 +225,16 @@ class _OpsApp:
                              if (p.get("name") or "") not in hidden]
 
     def _record_load_history(self, snap):
-        """把整机 CPU / 内存追加进环形缓冲，供前端画负载曲线。"""
+        """把整机 CPU / 内存追加进环形缓冲。只在 tick 循环调用——手动刷新
+        （/api/snapshot）只附带既有历史，不注入请求节奏的额外帧。"""
         self._load_history.append({
             "t": snap.get("ts", ""),
             "cpu": snap.get("cpu") or 0,
             "mem": snap.get("mem") or 0,
         })
+        self._attach_history(snap)
+
+    def _attach_history(self, snap):
         snap["history"] = list(self._load_history)
 
     def _anchor_owner(self, pid, unit_by_pid, ppid_map):
@@ -373,6 +377,7 @@ class _OpsApp:
             snap = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "error": str(e),
                     "cpu": 0, "mem": 0, "proc_count": 0, "procs": [], "ports": []}
         self._finalize_snapshot(snap)
+        self._attach_history(snap)
         self.latest_snapshot = snap
         self.broadcast("snapshot", snap)
 

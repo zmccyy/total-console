@@ -65,6 +65,26 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(cfg["settings"]["scan_roots"], ["E:\\legacy"])
         self.assertNotIn("scan_roots", cfg)
 
+    def test_v02_config_gains_new_fields_without_migration(self):
+        """0.2 版配置（无 watch_keywords/hidden_procs；units 无 env 字段）加载后
+        默认合并补齐，旧数据原样保留。"""
+        self.data_dir.mkdir(parents=True)
+        (self.data_dir / "config.json").write_text(json.dumps({
+            "schemaVersion": 2,
+            "units": [{"id": "old1", "kind": "service", "name": "web",
+                       "command": "npm run dev", "workdir": "E:\\x", "order": 0,
+                       "status": "stopped", "pid": None}],
+            "port_baseline": {"127.0.0.1:8000": 1.0},
+            "settings": {"poll_interval": 2, "theme": "dark",
+                         "ignored_ports": [], "notifications": True},
+        }), encoding="utf-8")
+        cfg = store.load_config(self.data_dir)
+        self.assertEqual(cfg["settings"]["watch_keywords"], [])
+        self.assertEqual(cfg["settings"]["hidden_procs"], [])
+        self.assertEqual(cfg["settings"]["theme"], "dark")  # 旧值保留
+        self.assertEqual(cfg["units"][0]["name"], "web")    # 旧单元原样
+        self.assertNotIn("env", cfg["units"][0])            # 不凭空造字段
+
     def test_corrupt_json_falls_back_to_defaults(self):
         self.data_dir.mkdir(parents=True)
         (self.data_dir / "config.json").write_text("{corrupt", encoding="utf-8")

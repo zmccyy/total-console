@@ -164,7 +164,11 @@ class Launchpad:
             return dict(unit)
 
     def update_unit(self, unit_id, fields):
-        """编辑单元（运行中禁止），返回更新后的副本；字段缺失抛 ValueError。"""
+        """编辑单元（运行中禁止），返回更新后的副本；字段缺失抛 ValueError。
+
+        env / env_file 仅在请求体携带对应键时更新（缺省保持原值）；
+        env=None 视为清空，非对象或含非标量值抛 ValueError。
+        """
         with store.CONFIG_LOCK:
             unit = self.get_unit(unit_id)
             if unit["status"] == "running":
@@ -179,9 +183,18 @@ class Launchpad:
             unit["workdir"] = str(fields.get("workdir") or "").strip()
             if fields.get("kind") in ("service", "task"):
                 unit["kind"] = fields["kind"]
-            env = fields.get("env")
-            unit["env"] = {str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else {}
-            unit["env_file"] = str(fields.get("env_file") or "").strip()
+            if "env" in fields:
+                env = fields["env"]
+                if env is None:
+                    unit["env"] = {}
+                elif isinstance(env, dict) and all(
+                        isinstance(k, str) and isinstance(v, (str, int, float, bool))
+                        for k, v in env.items()):
+                    unit["env"] = {str(k): str(v) for k, v in env.items()}
+                else:
+                    raise ValueError("env 必须为字符串键值对对象")
+            if "env_file" in fields:
+                unit["env_file"] = str(fields.get("env_file") or "").strip()
             self._save()
             return dict(unit)
 
@@ -296,23 +309,68 @@ class Launchpad:
             return dict(unit)
 
     def stop(self, unit_id):
+        """三重校验通过后在锁外执行 taskkill（最长 15s，不阻塞快照与其它
+        请求），再重新持锁提交状态。"""
         with store.CONFIG_LOCK:
-            return self._stop_locked(unit_id)
-
-    def _stop_locked(self, unit_id):
-        unit = self.get_unit(unit_id)
-        if unit["pid"] is None:
+            unit = self.get_unit(unit_id)
+            if unit["pid"] is None:
+                unit["status"] = "stopped"
+                self._save()
+                return dict(unit)
+            if not psutil.pid_exists(unit["pid"]):
+                self._mark_gone(unit)
+                self._save()
+                return dict(unit)
+            self._verify_stop_allowed(unit)
+            pid = unit["pid"]
+        # ---- 锁外：真正终止进程树 ----
+        try:
+            result = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True, timeout=_KILL_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+        # ---- 重新持锁提交 ----
+        with store.CONFIG_LOCK:
+            try:
+                unit = self.get_unit(unit_id)  # 可能已被并发删除/变更
+            except UnitNotFoundError:
+                return {"id": unit_id, "status": "stopped"}
+            if unit.get("pid") != pid:
+                # 等待期间单元已被并发重启/认领到新进程，不覆盖其当前状态
+                return dict(unit)
+            if result is None:
+                if psutil.pid_exists(pid):
+                    raise Error("终止 PID %d 失败：taskkill 超时" % pid)
+                self._mark_gone(unit)
+                self._save()
+                return dict(unit)
+            if result.returncode != 0:
+                # taskkill 失败：进程可能恰好自行退出了——确认后按已消失处理，
+                # 确认还活着则如实报错，不再静默当作已停止
+                if psutil.pid_exists(pid):
+                    detail = (result.stderr or b"").decode("utf-8", "replace").strip()
+                    raise Error("终止 PID %d 失败：%s" % (
+                        pid, detail or "taskkill 返回码 %d" % result.returncode))
+                self._mark_gone(unit)
+                self._save()
+                return dict(unit)
+            popen = self._procs.pop(unit_id, None)
+            if popen is not None:
+                popen.poll()  # 回收退出状态，避免 Popen 残留告警
+            unit["pid"] = None
+            unit["start_time"] = None
+            unit["exit_code"] = None
             unit["status"] = "stopped"
             self._save()
             return dict(unit)
-        if not psutil.pid_exists(unit["pid"]):
-            self._mark_gone(unit)
-            self._save()
-            return dict(unit)
+
+    def _verify_stop_allowed(self, unit):
+        """停止前三重校验（对齐上游 run token + 进程组 + UID）：
+        ① create_time 与记录一致（防 PID 复用）② 命令行含本次运行令牌
+        ③ 进程属当前用户。认领的进程没有令牌，退化为 ①+③。须持锁调用。"""
         proc = psutil.Process(unit["pid"])
-        # 三重校验（对齐上游 run token + 进程组 + UID）：
-        # ① create_time 与记录一致（防 PID 复用）② 命令行含本次运行令牌
-        # ③ 进程属当前用户。认领的进程没有令牌，退化为 ①+③。
         try:
             actual = proc.create_time()
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
@@ -333,31 +391,11 @@ class Launchpad:
         if cmdline is not None and not _same_user(username):
             raise StopRejectedError(
                 "PID %d 不属于当前用户，拒绝终止" % unit["pid"])
-        result = subprocess.run(
-            ["taskkill", "/PID", str(unit["pid"]), "/T", "/F"],
-            capture_output=True, timeout=_KILL_TIMEOUT,
-        )
-        if result.returncode != 0:
-            # taskkill 失败：进程可能恰好自行退出了——确认后按已消失处理，
-            # 确认还活着则如实报错，不再静默当作已停止
-            if psutil.pid_exists(unit["pid"]):
-                detail = (result.stderr or b"").decode("utf-8", "replace").strip()
-                raise Error("终止 PID %d 失败：%s" % (
-                    unit["pid"], detail or "taskkill 返回码 %d" % result.returncode))
-            self._mark_gone(unit)
-            self._save()
-            return dict(unit)
-        popen = self._procs.pop(unit_id, None)
-        if popen is not None:
-            popen.poll()  # 回收退出状态，避免 Popen 残留告警
-        unit["pid"] = None
-        unit["start_time"] = None
-        unit["exit_code"] = None
-        unit["status"] = "stopped"
-        self._save()
-        return dict(unit)
 
     def restart(self, unit_id):
+        """重启 = stop + start 两个独立阶段（各自持锁）。两阶段之间允许
+        并发读，不做跨阶段原子性：单用户场景下并发干预自身重启属误操作，
+        交给各自的 409/404 语义兜底。"""
         unit = self.get_unit(unit_id)
         if unit["status"] == "running":
             self.stop(unit_id)

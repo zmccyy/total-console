@@ -23,7 +23,7 @@ function unitCard(u) {
   const envCount = Object.keys(u.env || {}).length;
   const envChip = (envCount || u.env_file)
     ? '<span class="tag" title="环境变量' + (envCount ? " " + envCount + " 项" : "") +
-      (u.env_file ? " · 文件 " + u.env_file : "") + '">ENV' +
+      (u.env_file ? " · 文件 " + esc(u.env_file) : "") + '">ENV' +
       (envCount ? "×" + envCount : "") + (u.env_file ? "+.env" : "") + "</span>"
     : "";
   const statusLine = running

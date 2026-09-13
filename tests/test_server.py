@@ -334,6 +334,32 @@ class ServerIntegrationTest(unittest.TestCase):
                 integrations.open_terminal("Z:\\不存在的目录\\xyz")
             p.assert_not_called()
 
+    def test_version_matches_version_file(self):
+        version_file = (Path(__file__).resolve().parent.parent / "VERSION").read_text(
+            encoding="utf-8").strip()
+        self.assertEqual(server.VERSION, version_file)
+
+    def test_unit_put_rejects_invalid_env_400(self):
+        h = self.auth_headers()
+        _, data = self.request("POST", "/api/units",
+                               body=json.dumps({"name": "envval", "command": "echo 1"}),
+                               headers=h)
+        uid = json.loads(data)["id"]
+        status, _ = self.request("PUT", "/api/units/%s" % uid,
+                                 body=json.dumps({"name": "envval", "command": "echo 1",
+                                                  "env": {"k": {"deep": 1}}}),
+                                 headers=h)
+        self.assertEqual(status, 400)
+        # 不带 env 键的编辑不清空已有 env
+        self.request("PUT", "/api/units/%s" % uid,
+                     body=json.dumps({"name": "envval", "command": "echo 1",
+                                      "env": {"KEEP": "1"}}), headers=h)
+        status, data = self.request("PUT", "/api/units/%s" % uid,
+                                    body=json.dumps({"name": "envval", "command": "echo 1"}),
+                                    headers=h)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(data)["env"], {"KEEP": "1"})
+
     def test_open_tool_unknown_unit_404(self):
         status, _ = self.request("POST", "/api/units/zzz/open-terminal",
                                  headers=self.auth_headers())
