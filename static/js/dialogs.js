@@ -13,11 +13,26 @@ export function openUnitDialog(opts = {}) {
   $("#unit-name").value = opts.name || "";
   $("#unit-command").value = opts.command || "";
   $("#unit-workdir").value = opts.workdir || "";
+  $("#unit-env").value = Object.entries(opts.env || {})
+    .map(([k, v]) => k + "=" + v).join("\n");
+  $("#unit-envfile").value = opts.env_file || "";
   const kind = opts.kind || "service";
   $$('input[name="unit-kind"]').forEach((r) => { r.checked = r.value === kind; });
   $("#unit-candidates").innerHTML = "";
   $("#unit-project-select").value = opts.workdir || "";
   $("#unit-dialog").showModal();
+}
+
+// 「环境变量」多行文本 → 对象（每行 KEY=VALUE，# 注释与空行忽略）
+export function parseEnvText(text) {
+  const env = {};
+  String(text || "").split("\n").forEach((line) => {
+    const s = line.trim();
+    if (!s || s.startsWith("#")) return;
+    const i = s.indexOf("=");
+    if (i > 0) env[s.slice(0, i).trim()] = s.slice(i + 1).trim();
+  });
+  return env;
 }
 
 export function closeUnitDialog() {
@@ -84,6 +99,8 @@ $("#unit-form").addEventListener("submit", async (e) => {
     kind: document.querySelector('input[name="unit-kind"]:checked').value,
     command: $("#unit-command").value.trim(),
     workdir: $("#unit-workdir").value.trim(),
+    env: parseEnvText($("#unit-env").value),
+    env_file: $("#unit-envfile").value.trim(),
   };
   if (!body.name || !body.command) return;
   const claimPid = state.claimPid;

@@ -98,6 +98,20 @@ class DiagnoseTest(unittest.TestCase):
         self.assertIn("npm install", hint)
         self.assertIsNone(diagnose.install_deps_hint({"workdir": ""}))
 
+    def test_env_file_missing_warns_not_blocking(self):
+        unit = {"command": "echo hi", "workdir": "", "env_file": "Z:/no-such/.env"}
+        r = diagnose.health(unit)
+        kinds = [i["kind"] for i in r["issues"]]
+        self.assertIn("env-file-missing", kinds)
+        self.assertFalse(r["blocking"])
+        self.assertEqual(r["status"], "warn")
+        # 文件存在 → 无提示
+        env = self.dir / ".env"
+        env.write_text("A=1", encoding="utf-8")
+        r2 = diagnose.health({"command": "echo hi", "workdir": str(self.dir), "env_file": ".env"})
+        self.assertNotIn("env-file-missing", [i["kind"] for i in r2["issues"]])
+        self.assertEqual(r2["status"], "ok")
+
 
 if __name__ == "__main__":
     unittest.main()

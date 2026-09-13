@@ -180,9 +180,17 @@ def main():
         cmd = '"%s" -c "import time; time.sleep(120)"' % sys.executable
         status, unit = req_json("POST", "/api/units", port, token=token,
                                 body={"name": "冒烟服务", "command": cmd,
-                                      "kind": "service", "workdir": str(ROOT)})
+                                      "kind": "service", "workdir": str(ROOT),
+                                      "env": {"SMOKE_VAR": "1"}, "env_file": ".env"})
         unit_id = (unit or {}).get("id")
-        check("创建单元 201", status == 201 and unit_id, "status=%s" % status)
+        check("创建单元 201（含环境变量）", status == 201 and unit_id
+              and (unit or {}).get("env") == {"SMOKE_VAR": "1"}
+              and (unit or {}).get("env_file") == ".env",
+              "status=%s body=%r" % (status, unit))
+        status, units = req_json("GET", "/api/units", port)
+        persisted = next((u for u in units or [] if u.get("id") == unit_id), {})
+        check("环境变量持久化", persisted.get("env") == {"SMOKE_VAR": "1"},
+              "env=%r" % persisted.get("env"))
 
         status, units = req_json("GET", "/api/units", port)
         check("单元列表含新单元", status == 200 and any(u.get("id") == unit_id for u in units or []),

@@ -339,6 +339,36 @@ class ServerIntegrationTest(unittest.TestCase):
                                  headers=self.auth_headers())
         self.assertEqual(status, 404)
 
+    # ---------- 环境变量 ----------
+
+    def test_unit_env_roundtrip_and_clear(self):
+        h = self.auth_headers()
+        status, data = self.request("POST", "/api/units",
+                                    body=json.dumps({"name": "envd", "kind": "service",
+                                                     "command": "echo 1",
+                                                     "env": {"A": "1", "N": 2},
+                                                     "env_file": ".env"}),
+                                    headers=h)
+        self.assertEqual(status, 201)
+        unit = json.loads(data)
+        self.assertEqual(unit["env"], {"A": "1", "N": "2"})
+        self.assertEqual(unit["env_file"], ".env")
+        status, data = self.request("PUT", "/api/units/%s" % unit["id"],
+                                    body=json.dumps({"name": "envd", "command": "echo 1",
+                                                     "env": None, "env_file": ""}),
+                                    headers=h)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(data)["env"], {})
+
+    def test_unit_env_invalid_400(self):
+        h = self.auth_headers()
+        for bad in ("notadict", {"k": {"deep": 1}}, [1, 2]):
+            status, _ = self.request("POST", "/api/units",
+                                     body=json.dumps({"name": "x", "command": "echo 1",
+                                                      "env": bad}),
+                                     headers=h)
+            self.assertEqual(status, 400, repr(bad))
+
 
 if __name__ == "__main__":
     unittest.main()

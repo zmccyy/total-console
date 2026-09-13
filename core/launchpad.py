@@ -1,9 +1,11 @@
 import getpass
+import os
 import secrets
 import shutil
 import subprocess
 import time
 import uuid
+from pathlib import Path
 
 import psutil
 
@@ -52,6 +54,51 @@ def _same_user(proc_username):
     return tail == current_username()
 
 
+def parse_env_file(path):
+    """解析 .env 文件：KEY=VALUE 每行一条，# 注释与空行忽略，
+    支持可选 export 前缀与成对引号。坏行跳过不报错。"""
+    values = {}
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return values
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key:
+            values[key] = value
+    return values
+
+
+def effective_env(unit):
+    """单元的生效环境变量：进程环境 + .env 文件（先加载）+ 手写 env（覆盖）。"""
+    extra = {}
+    env_file = str(unit.get("env_file") or "").strip()
+    if env_file:
+        path = Path(env_file)
+        if not path.is_absolute():
+            base = unit.get("workdir") or "."
+            path = Path(base) / path
+        extra.update(parse_env_file(path))
+    for k, v in (unit.get("env") or {}).items():
+        extra[str(k)] = str(v)
+    if not extra:
+        return None
+    env = dict(os.environ)
+    env.update(extra)
+    return env
+
+
 class Launchpad:
     def __init__(self, data_dir=None, config=None):
         self.data_dir = data_dir
@@ -84,7 +131,8 @@ class Launchpad:
 
     # ---------- 变更 ----------
 
-    def create_unit(self, name, kind, command, workdir="", order=None):
+    def create_unit(self, name, kind, command, workdir="", order=None,
+                    env=None, env_file=None):
         with store.CONFIG_LOCK:
             if kind not in ("service", "task"):
                 kind = "service"
@@ -104,6 +152,8 @@ class Launchpad:
                 "owned": "managed",
                 "created_at": time.time(),
                 "last_started_at": None,
+                "env": dict(env or {}),
+                "env_file": str(env_file or "").strip(),
             }
             self.config["units"].append(unit)
             self._save()
@@ -115,15 +165,19 @@ class Launchpad:
             unit = self.get_unit(unit_id)
             if unit["status"] == "running":
                 raise UnitBusyError("单元运行中，先停止再编辑")
-            name = str((fields or {}).get("name") or "").strip()
-            command = str((fields or {}).get("command") or "").strip()
+            fields = fields or {}
+            name = str(fields.get("name") or "").strip()
+            command = str(fields.get("command") or "").strip()
             if not name or not command:
                 raise ValueError("name 与 command 为必填")
             unit["name"] = name
             unit["command"] = command
-            unit["workdir"] = str((fields or {}).get("workdir") or "").strip()
-            if (fields or {}).get("kind") in ("service", "task"):
+            unit["workdir"] = str(fields.get("workdir") or "").strip()
+            if fields.get("kind") in ("service", "task"):
                 unit["kind"] = fields["kind"]
+            env = fields.get("env")
+            unit["env"] = {str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else {}
+            unit["env_file"] = str(fields.get("env_file") or "").strip()
             self._save()
             return dict(unit)
 
@@ -212,6 +266,7 @@ class Launchpad:
                 popen = subprocess.Popen(
                     cmd,
                     cwd=unit["workdir"] or None,
+                    env=effective_env(unit),
                     stdin=subprocess.DEVNULL,
                     stdout=log,
                     stderr=subprocess.STDOUT,

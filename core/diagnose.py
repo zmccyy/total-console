@@ -91,6 +91,19 @@ def health(unit):
             "找不到配置的工作目录：%s" % workdir,
             "编辑这个命令单元，修正工作目录。", "edit-workdir")
 
+    # .env 文件缺失为非阻断提醒（文件可能按需生成）
+    env_file = str(unit.get("env_file") or "").strip()
+    if env_file:
+        p = Path(env_file)
+        if not p.is_absolute() and workdir:
+            p = Path(workdir) / p
+        if not p.is_file():
+            issues.append({"kind": "env-file-missing", "severity": "warning",
+                           "title": ".env 文件缺失",
+                           "detail": "配置的环境变量文件不存在：%s" % p,
+                           "fix": "创建该 .env 文件，或编辑单元清空环境变量文件路径。",
+                           "action": "edit-command"})
+
     if workdir and os.path.isdir(workdir):
         pkg = Path(workdir) / "package.json"
         if pkg.is_file() and not (Path(workdir) / "node_modules").is_dir():
@@ -129,8 +142,9 @@ def health(unit):
                     "系统 PATH 和工作目录里都找不到命令「%s」。" % first,
                     "确认该运行时已安装（如 node / python / pnpm），或改用完整路径。")
 
-    return {"status": "error" if issues else "ok",
-            "blocking": bool(issues), "issues": issues}
+    errors = [i for i in issues if i.get("severity", "error") == "error"]
+    return {"status": "error" if errors else ("warn" if issues else "ok"),
+            "blocking": bool(errors), "issues": issues}
 
 
 def diagnose(unit, log_tail=""):

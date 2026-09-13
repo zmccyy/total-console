@@ -184,6 +184,53 @@ class LaunchpadTest(unittest.TestCase):
         self.assertEqual(rec["code"], 3)
         self.assertIsNotNone(rec["duration"])
 
+    # ---------- 环境变量 ----------
+
+    def test_parse_env_file(self):
+        env = Path(self._tmp.name) / "vars.env"
+        env.write_text(
+            "# 注释行\n"
+            "\n"
+            "PLAIN=1\n"
+            "QUOTED=\"two words\"\n"
+            "SINGLE='v'\n"
+            "export EXPORTED=yes\n"
+            "BAD LINE WITHOUT EQUALS\n",
+            encoding="utf-8")
+        values = launchpad.parse_env_file(env)
+        self.assertEqual(values, {"PLAIN": "1", "QUOTED": "two words",
+                                  "SINGLE": "v", "EXPORTED": "yes"})
+
+    def test_effective_env_precedence_and_missing_file(self):
+        env = Path(self._tmp.name) / "vars.env"
+        env.write_text("FROM_FILE=1\nOVERRIDE=file\n", encoding="utf-8")
+        unit = {"workdir": str(self._tmp.name), "env": {"OVERRIDE": "hand", "ONLY_HAND": "2"},
+                "env_file": "vars.env"}
+        effective = launchpad.effective_env(unit)
+        self.assertEqual(effective["FROM_FILE"], "1")
+        self.assertEqual(effective["OVERRIDE"], "hand")  # 手写覆盖文件
+        self.assertEqual(effective["ONLY_HAND"], "2")
+        self.assertTrue(effective["PATH"])  # 继承进程环境
+        # 无 env 配置 → None（完全继承）
+        self.assertIsNone(launchpad.effective_env({"workdir": "", "env": {}, "env_file": ""}))
+        # env 文件不存在 → 静默跳过（健康检查会提示）
+        unit_bad = {"workdir": str(self._tmp.name), "env": {}, "env_file": "no-such.env"}
+        self.assertIsNone(launchpad.effective_env(unit_bad))
+
+    def test_start_injects_env(self):
+        u = self.lp.create_unit(
+            "envtask", "task",
+            'python -c "import os; print(\'VAL=\' + os.environ.get(\'OPS_ENV_TEST\', \'MISSING\'))"',
+            "", env={"OPS_ENV_TEST": "hello123"})
+        self.lp.start(u["id"])
+        for _ in range(30):
+            time.sleep(0.3)
+            self.lp.refresh()
+            if self.lp.get_unit(u["id"])["status"] != "running":
+                break
+        log = self.lp.log_tail(u["id"])
+        self.assertIn("VAL=hello123", log)
+
 
 if __name__ == "__main__":
     unittest.main()

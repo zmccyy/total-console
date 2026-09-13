@@ -318,6 +318,14 @@ try {
       <label>工作目录</label>
       <input id="unit-workdir" placeholder="项目目录或留空">
     </div>
+    <div class="form-row">
+      <label>环境变量（每行 KEY=VALUE，# 注释）</label>
+      <textarea id="unit-env" rows="2" placeholder="NODE_ENV=development"></textarea>
+    </div>
+    <div class="form-row">
+      <label>环境变量文件（.env，相对工作目录或绝对路径；文件值先加载，上方手写值覆盖）</label>
+      <input id="unit-envfile" placeholder=".env">
+    </div>
     <div class="form-actions">
       <button type="button" id="unit-cancel" class="ghost">取消</button>
       <button type="submit" class="primary" id="unit-save">保存</button>

@@ -8,6 +8,20 @@ def units_list(ctx: ApiContext):
     ctx.send_json(200, ctx.app.launchpad.units())
 
 
+def _clean_env(value):
+    """校验请求里的 env 字段：dict(标量→标量) 或 None；非法抛 ValueError。"""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("env 必须为对象（键值对）")
+    out = {}
+    for k, v in value.items():
+        if not isinstance(k, str) or not isinstance(v, (str, int, float, bool)):
+            raise ValueError("env 的键值必须为字符串")
+        out[k] = str(v)
+    return out
+
+
 def unit_create(ctx: ApiContext):
     body = ctx.read_json()
     if body is None:
@@ -18,7 +32,13 @@ def unit_create(ctx: ApiContext):
         return ctx.send_text(400, "name 与 command 为必填")
     kind = body.get("kind") if body.get("kind") in ("service", "task") else "service"
     workdir = str(body.get("workdir") or "").strip()
-    unit = ctx.app.launchpad.create_unit(name, kind, command, workdir)
+    try:
+        env = _clean_env(body.get("env"))
+    except ValueError as e:
+        return ctx.send_text(400, str(e))
+    env_file = str(body.get("env_file") or "").strip()
+    unit = ctx.app.launchpad.create_unit(name, kind, command, workdir,
+                                         env=env, env_file=env_file)
     ctx.send_json(201, unit)
 
 

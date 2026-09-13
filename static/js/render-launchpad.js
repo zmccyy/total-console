@@ -20,13 +20,19 @@ function unitCard(u) {
         '" title="在浏览器打开 ' + esc(httpUrlFor(port.addr)) + '">:' + esc(port.addr.split(":")[1]) + " ↗</button>"
       : '<span class="port-chip">:' + esc(port.addr.split(":")[1]) + "</span>")
     : "";
+  const envCount = Object.keys(u.env || {}).length;
+  const envChip = (envCount || u.env_file)
+    ? '<span class="tag" title="环境变量' + (envCount ? " " + envCount + " 项" : "") +
+      (u.env_file ? " · 文件 " + u.env_file : "") + '">ENV' +
+      (envCount ? "×" + envCount : "") + (u.env_file ? "+.env" : "") + "</span>"
+    : "";
   const statusLine = running
     ? '<span class="status running">运行中</span>' + (claimed ? '<span class="tag claimed">已认领</span>' : "") +
-      portChip +
+      portChip + envChip +
       '<span class="muted">PID ' + u.pid + " · " + fmtUptime(u.last_started_at) + "</span>"
     : u.status === "exited"
-      ? '<span class="status exited">' + esc(unitStatusZh(u)) + "</span>"
-      : '<span class="status stopped">已停止</span>';
+      ? '<span class="status exited">' + esc(unitStatusZh(u)) + "</span>" + envChip
+      : '<span class="status stopped">已停止</span>' + envChip;
   const healthChip = healthBad
     ? '<button class="chip health-chip" data-id="' + esc(u.id) + '" title="' +
       esc(u.health.issues.map((i) => i.title).join("；")) + '">⚠ 需检查 ' + u.health.issues.length + "</button>"

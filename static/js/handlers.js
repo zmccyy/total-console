@@ -109,7 +109,8 @@ export function bind() {
     $("#diag-dialog").close();
     const u = ((state.snap && state.snap.units) || []).find((x) => x.id === id);
     if (!u) return;
-    openUnitDialog({ id: u.id, name: u.name, kind: u.kind, command: u.command, workdir: u.workdir });
+    openUnitDialog({ id: u.id, name: u.name, kind: u.kind, command: u.command,
+                     workdir: u.workdir, env: u.env, env_file: u.env_file });
   });
   $("#palette-input").addEventListener("input", (e) => {
     state.paletteIndex = 0;
@@ -268,7 +269,8 @@ function handleClick(e) {
     const u = state.snap.units.find((x) => x.id === edit.dataset.id);
     if (!u) return;
     if (u.status === "running") return showError("单元运行中，先停止再编辑");
-    return openUnitDialog({ id: u.id, name: u.name, kind: u.kind, command: u.command, workdir: u.workdir });
+    return openUnitDialog({ id: u.id, name: u.name, kind: u.kind, command: u.command,
+                            workdir: u.workdir, env: u.env, env_file: u.env_file });
   }
 
   const del = t.closest(".act-del");
