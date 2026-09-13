@@ -4,7 +4,7 @@ import { api } from "./api.js";
 import { state } from "./state.js";
 import { $, esc, portForUnit } from "./util.js";
 import { pushFeed } from "./feed.js";
-import { renderIgnoredPorts } from "./render-inventory.js";
+import { renderIgnoredPorts, renderSettings } from "./render-inventory.js";
 import { renderSnapshot } from "./render.js";
 
 export function showError(text, ttl) {
@@ -48,6 +48,22 @@ export async function ignorePort(port) {
     state.settings = await res.json();
     renderIgnoredPorts();
     pushFeed("端口 <b>:" + esc(port) + "</b> 已忽略并隐藏");
+  } else showError(await res.text());
+}
+
+export async function hideProcName(name) {
+  if (!state.settings || !name) return;
+  if (!confirm("隐藏所有名为「" + name + "」的进程？（盘点页设置中可恢复）")) return;
+  const cur = state.settings.hidden_procs || [];
+  if (cur.includes(name)) return;
+  const res = await api("/api/settings", {
+    method: "PUT",
+    body: { hidden_procs: cur.concat([name]) },
+  });
+  if (res.ok) {
+    state.settings = await res.json();
+    renderSettings(); // 设置面板同步显示已隐藏芯片，供恢复
+    pushFeed("进程 <b>" + esc(name) + "</b> 已隐藏（设置中可恢复）");
   } else showError(await res.text());
 }
 

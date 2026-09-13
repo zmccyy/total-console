@@ -3,6 +3,7 @@ import { api } from "./api.js";
 import { state } from "./state.js";
 import { $, $$, esc, switchView } from "./util.js";
 import { showError, setConn, refreshSnapshot, unitAction, ignorePort } from "./actions.js";
+import { hideProcName } from "./actions.js";
 import { clearFeed, pushFeed } from "./feed.js";
 import { applyTheme, nextTheme } from "./theme.js";
 import { renderUnitCards } from "./render-launchpad.js";
@@ -73,6 +74,28 @@ export function bind() {
     if (!btn || !state.settings) return;
     state.settings.scan_roots.splice(Number(btn.dataset.i), 1);
     renderSettings();
+  });
+  $("#add-watch-btn").addEventListener("click", () => {
+    const v = $("#new-watch-input").value.trim();
+    if (!v || !state.settings) return;
+    state.settings.watch_keywords = state.settings.watch_keywords || [];
+    if (!state.settings.watch_keywords.includes(v)) {
+      state.settings.watch_keywords.push(v);
+      saveSettingsRemote();
+    }
+    $("#new-watch-input").value = "";
+  });
+  $("#watch-keywords").addEventListener("click", (e) => {
+    const btn = e.target.closest(".del-watch");
+    if (!btn || !state.settings) return;
+    state.settings.watch_keywords.splice(Number(btn.dataset.i), 1);
+    saveSettingsRemote();
+  });
+  $("#hidden-procs").addEventListener("click", (e) => {
+    const btn = e.target.closest(".del-hidden");
+    if (!btn || !state.settings) return;
+    state.settings.hidden_procs.splice(Number(btn.dataset.i), 1);
+    saveSettingsRemote();
   });
   $("#save-settings-btn").addEventListener("click", async () => {
     const poll = Number($("#poll-input").value);
@@ -181,6 +204,19 @@ export async function openUnitTool(unitId, action, name) {
   pushFeed((result.feed || "已打开") + " <b>" + esc(name) + "</b>（" + esc(result.tool || "") + "）");
 }
 
+// 设置增量保存（关注关键字 / 隐藏进程芯片即时生效，不打断轮询）
+async function saveSettingsRemote() {
+  const s = state.settings;
+  const res = await api("/api/settings", {
+    method: "PUT",
+    body: { watch_keywords: s.watch_keywords || [], hidden_procs: s.hidden_procs || [],
+            ignored_ports: s.ignored_ports || [] },
+  });
+  if (!res.ok) return showError(await res.text());
+  state.settings = await res.json();
+  renderSettings();
+}
+
 function handleClick(e) {
   const t = e.target;
 
@@ -248,6 +284,9 @@ function handleClick(e) {
 
   const npIgnore = t.closest(".np-ignore") || t.closest(".ignore-port-btn");
   if (npIgnore) return ignorePort(npIgnore.dataset.port);
+
+  const hideProc = t.closest(".hide-proc-btn");
+  if (hideProc) return hideProcName(hideProc.dataset.name);
 
   const delIgnored = t.closest(".del-ignored");
   if (delIgnored && state.settings) {

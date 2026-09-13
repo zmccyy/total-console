@@ -29,6 +29,8 @@ def _defaults() -> dict:
             "theme": "system",
             "ignored_ports": [],
             "notifications": True,
+            "watch_keywords": [],
+            "hidden_procs": [],
         },
     }
 

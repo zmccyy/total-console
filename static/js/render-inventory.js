@@ -47,6 +47,12 @@ export function renderSettings() {
     '<span class="chip root-chip">' + esc(r) + '<button class="del-root" data-i="' + i + '">×</button></span>'
   ).join(""));
   $("#notify-toggle").checked = s.notifications !== false;
+  applyHtml($("#watch-keywords"), (s.watch_keywords || []).map((k, i) =>
+    '<span class="chip root-chip">' + esc(k) + '<button class="del-watch" data-i="' + i + '">×</button></span>'
+  ).join("") || '<span class="muted">无</span>');
+  applyHtml($("#hidden-procs"), (s.hidden_procs || []).map((n, i) =>
+    '<span class="chip root-chip">' + esc(n) + '<button class="del-hidden" data-i="' + i + '">×</button></span>'
+  ).join("") || '<span class="muted">无</span>');
   renderIgnoredPorts();
 }
 

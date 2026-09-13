@@ -148,7 +148,7 @@ def main():
         status, snap = req_json("GET", "/api/snapshot", port)
         check("快照结构", status == 200 and isinstance(snap, dict)
               and "cpu" in snap and "mem" in snap and "ports" in snap
-              and "procs" in snap and "units" in snap,
+              and "procs" in snap and "units" in snap and "history" in snap,
               "status=%s keys=%s" % (status, list(snap or {})[:8]))
         check("快照轮询间隔", (snap or {}).get("poll_interval", 0) == 2,
               "poll_interval=%r" % (snap or {}).get("poll_interval"))

@@ -82,8 +82,9 @@ export function renderProcs(snap) {
     if (port) badges.push('<span class="tag">端口·' + esc(port.addr.split(":")[1]) + "</span>");
     const u = (port && port.unit_id && unitById.get(port.unit_id)) || managedUnitForPid(p.pid);
     if (u) badges.push('<span class="tag managed">' + esc(u.name) + "</span>");
+    if (p.watched) badges.push('<span class="tag watched">关注</span>');
     return (
-      "<tr>" +
+      "<tr" + (p.watched ? ' class="row-watched"' : "") + ">" +
       "<td>" + esc(p.name) + badges.join(" ") + "</td>" +
       '<td class="num">' + p.pid + "</td>" +
       '<td class="num">' + (p.cpu != null ? p.cpu : "—") + "</td>" +
@@ -91,9 +92,53 @@ export function renderProcs(snap) {
       "<td>" + esc(STATUS_ZH[p.status] || p.status || "—") + "</td>" +
       '<td class="num">' + fmtUptime(p.started) + "</td>" +
       "<td>" + esc(p.username || "—") + "</td>" +
+      '<td><button class="mini hide-proc-btn" data-name="' + esc(p.name) + '" title="隐藏该名称的所有进程">隐藏</button></td>' +
       "</tr>");
   }).join("");
   applyHtml($("#procs-table tbody"), html);
+}
+
+// ---------- 关注进程（关键字匹配，独立分组） ----------
+
+export function renderWatchedProcs(snap) {
+  const watched = (snap.procs || []).filter((p) => p.watched)
+    .slice().sort((a, b) => b.cpu - a.cpu).slice(0, 50);
+  $("#watched-count").textContent = watched.length;
+  applyHtml($("#watched-table tbody"), watched.map((p) =>
+    "<tr>" +
+    "<td>" + esc(p.name) + "</td>" +
+    '<td class="num">' + p.pid + "</td>" +
+    '<td class="num">' + (p.cpu != null ? p.cpu : "—") + "</td>" +
+    '<td class="num">' + fmtMem(p.rss) + "</td>" +
+    '<td class="mono cmd" title="' + esc(p.cmdline || "") + '">' + esc(p.cmdline || "—") + "</td>" +
+    '<td><button class="mini hide-proc-btn" data-name="' + esc(p.name) + '">隐藏</button></td>' +
+    "</tr>"
+  ).join("") || '<tr><td colspan="6" class="muted">没有匹配关注关键字的进程。在盘点页设置中添加关键字。</td></tr>');
+}
+
+// ---------- 负载曲线（零依赖 SVG sparkline） ----------
+
+export function renderSpark(history) {
+  const html = sparkSvg(history);
+  applyHtml($("#load-spark"), html);
+  applyHtml($("#load-spark-m"), html);
+  const range = $("#spark-range");
+  if (range && history && history.length) {
+    range.textContent = "近 " + history.length + " 帧";
+  }
+}
+
+function sparkSvg(history) {
+  if (!history || history.length < 2) {
+    return '<div class="muted" style="font-size:12px;padding-top:22px;text-align:center">正在积累数据…</div>';
+  }
+  const w = 260, h = 60, n = history.length - 1;
+  const line = (key) => history.map((p, i) =>
+    (i ? "L" : "M") + (i / n * w).toFixed(1) + "," + (h - Math.min(100, Math.max(0, p[key])) / 100 * h).toFixed(1)
+  ).join(" ");
+  return '<svg viewBox="0 0 ' + w + " " + h + '" preserveAspectRatio="none">' +
+    '<path class="spark-mem" d="' + line("mem") + '"/>' +
+    '<path class="spark-cpu" d="' + line("cpu") + '"/></svg>';
 }
 
 export function topPorts(limit) {

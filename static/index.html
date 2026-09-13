@@ -117,6 +117,11 @@ try {
 
         <aside class="col-side">
           <div class="side-card">
+            <div class="side-head">负载曲线<span class="side-note" id="spark-range"></span></div>
+            <div id="load-spark" class="spark-box"></div>
+            <div class="spark-legend"><span class="lg lg-cpu">CPU</span><span class="lg lg-mem">内存</span></div>
+          </div>
+          <div class="side-card">
             <div class="side-head">实时动态<button class="mini" id="feed-clear">清空</button></div>
             <div class="feed" id="feed"></div>
           </div>
@@ -166,6 +171,19 @@ try {
           <div id="new-ports" class="new-ports hidden"></div>
           <div class="section-head">
             <span class="section-tag"></span>
+            <span class="section-title">WATCHED · 关注进程</span>
+            <span class="section-count" id="watched-count">0</span>
+            <span class="side-note">在设置中配置关键字（匹配进程名或命令行）</span>
+          </div>
+          <div class="panel-strip">
+            <table class="data-table" id="watched-table">
+              <thead><tr><th>进程</th><th>PID</th><th>CPU%</th><th>内存</th><th>命令行</th><th>操作</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="section-head">
+            <span class="section-tag"></span>
             <span class="section-title">PROJECT PORTS · 项目端口</span>
             <span class="section-count" id="proj-port-count">0</span>
           </div>
@@ -208,6 +226,11 @@ try {
           <div class="side-card">
             <div class="side-head">实时告警</div>
             <div class="side-body" id="alerts">运行良好，暂无告警</div>
+          </div>
+          <div class="side-card">
+            <div class="side-head">负载曲线</div>
+            <div id="load-spark-m" class="spark-box"></div>
+            <div class="spark-legend"><span class="lg lg-cpu">CPU</span><span class="lg lg-mem">内存</span></div>
           </div>
           <div class="side-card">
             <div class="side-head">端口占用 TOP5</div>
@@ -276,6 +299,18 @@ try {
             <div class="setting-block" id="ignored-ports-block">
               <label>已忽略端口（服务监控不再显示）</label>
               <div id="ignored-ports" class="chips"></div>
+            </div>
+            <div class="setting-block">
+              <label>进程关注关键字（监控页独立分组展示）</label>
+              <div id="watch-keywords" class="chips"></div>
+              <div class="inline-form">
+                <input id="new-watch-input" placeholder="如 node、python、我的服务名">
+                <button id="add-watch-btn" class="outline">添加</button>
+              </div>
+            </div>
+            <div class="setting-block" id="hidden-procs-block">
+              <label>已隐藏进程（监控页不再显示，点 × 恢复）</label>
+              <div id="hidden-procs" class="chips"></div>
             </div>
             <button id="save-settings-btn" class="primary">保存设置</button>
           </div>

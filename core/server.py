@@ -6,6 +6,7 @@
 与应用状态编排（快照、SSE、盘点、设置）。API 路由按域注册在 core/api/。
 """
 import argparse
+import collections
 import json
 import os
 import queue
@@ -28,6 +29,7 @@ from core.meta import (APP_MARKER, DEFAULT_PORT, PORT_TRIES, REGISTRY_PATH,
 HEALTH_TTL = 30          # 运行前健康检查缓存秒数
 ORIGIN_TTL = 60          # 进程溯源缓存秒数
 BASELINE_MAX_AGE = 14 * 86400  # 端口基线保留天数
+LOAD_HISTORY_LEN = 120   # 负载曲线保留帧数（× 轮询间隔 ≈ 4 分钟）
 
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -75,6 +77,7 @@ class _OpsApp:
         self.inventory_cache = None
         self.inventory_scanning = False
         self._inventory_started_at = 0.0
+        self._load_history = collections.deque(maxlen=LOAD_HISTORY_LEN)
         self._health_cache = {}   # unit_id -> (fingerprint, ts, result)
         self._origin_cache = {}   # pid -> (ts, {"label","icon"})
         self._subscribers = set()
@@ -109,6 +112,11 @@ class _OpsApp:
                 settings["theme"] = body["theme"] if body["theme"] in ("light", "dark", "system") else "system"
             if isinstance(body.get("ignored_ports"), list):
                 settings["ignored_ports"] = [str(x) for x in body["ignored_ports"]]
+            if isinstance(body.get("watch_keywords"), list):
+                settings["watch_keywords"] = [str(x).strip() for x in body["watch_keywords"]
+                                              if str(x).strip()]
+            if isinstance(body.get("hidden_procs"), list):
+                settings["hidden_procs"] = [str(x) for x in body["hidden_procs"]]
             if "notifications" in body:
                 settings["notifications"] = bool(body["notifications"])
             self.save_config()
@@ -197,6 +205,33 @@ class _OpsApp:
         snap["ports"] = kept
         snap["port_stats"] = port_stats
         self._apply_port_baseline(snap)
+        self._mark_watched_and_hidden(snap)
+        self._record_load_history(snap)
+
+    def _mark_watched_and_hidden(self, snap):
+        """进程关注列表标记（关键字匹配名称/命令行）与隐藏进程过滤。
+        过滤放在端口归属之后，避免破坏溯源所需的父链映射。"""
+        watch = [k.lower() for k in self.settings.get("watch_keywords") or []]
+        for p in snap.get("procs", []):
+            if not watch:
+                p["watched"] = False
+                continue
+            name_l = (p.get("name") or "").lower()
+            cmdline_l = (p.get("cmdline") or "").lower()
+            p["watched"] = any(k in name_l or k in cmdline_l for k in watch)
+        hidden = {str(n) for n in self.settings.get("hidden_procs") or []}
+        if hidden:
+            snap["procs"] = [p for p in snap.get("procs", [])
+                             if (p.get("name") or "") not in hidden]
+
+    def _record_load_history(self, snap):
+        """把整机 CPU / 内存追加进环形缓冲，供前端画负载曲线。"""
+        self._load_history.append({
+            "t": snap.get("ts", ""),
+            "cpu": snap.get("cpu") or 0,
+            "mem": snap.get("mem") or 0,
+        })
+        snap["history"] = list(self._load_history)
 
     def _anchor_owner(self, pid, unit_by_pid, ppid_map):
         """pid 的祖先链上是否挂在本控制台某个锚点之下（纯字典查找）。"""

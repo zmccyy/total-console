@@ -369,6 +369,52 @@ class ServerIntegrationTest(unittest.TestCase):
                                      headers=h)
             self.assertEqual(status, 400, repr(bad))
 
+    # ---------- 监控补齐：关注 / 隐藏 / 负载曲线 ----------
+
+    def test_settings_watch_and_hidden_roundtrip(self):
+        h = self.auth_headers()
+        status, _ = self.request("PUT", "/api/settings",
+                                 body=json.dumps({"watch_keywords": ["node", "python"],
+                                                  "hidden_procs": ["svchost"]}),
+                                 headers=h)
+        self.assertEqual(status, 200)
+        _, data = self.request("GET", "/api/settings")
+        s = json.loads(data)
+        self.assertEqual(s["watch_keywords"], ["node", "python"])
+        self.assertEqual(s["hidden_procs"], ["svchost"])
+        # 清理，避免影响其他断言
+        self.request("PUT", "/api/settings",
+                     body=json.dumps({"watch_keywords": [], "hidden_procs": []}), headers=h)
+
+    def test_snapshot_watch_hide_history(self):
+        app = self.srv.app
+        _, data = self.request("GET", "/api/snapshot")
+        first = json.loads(data)
+        if not first["procs"]:
+            self.skipTest("没有进程快照")
+        target = first["procs"][0]["name"]
+        app.settings["watch_keywords"] = [target]
+        app.settings["hidden_procs"] = []
+        try:
+            _, data = self.request("GET", "/api/snapshot")
+            snap = json.loads(data)
+            matched = [p for p in snap["procs"] if p["name"] == target]
+            if matched:
+                self.assertTrue(all(p["watched"] for p in matched))
+            # 负载历史随帧携带
+            self.assertTrue(snap["history"])
+            self.assertIn("cpu", snap["history"][-1])
+            self.assertIn("mem", snap["history"][-1])
+            # 隐藏进程名后不再出现
+            app.settings["hidden_procs"] = [target]
+            _, data = self.request("GET", "/api/snapshot")
+            names = {p["name"] for p in json.loads(data)["procs"]}
+            self.assertNotIn(target, names)
+        finally:
+            app.settings["watch_keywords"] = []
+            app.settings["hidden_procs"] = []
+            app.save_config()
+
 
 if __name__ == "__main__":
     unittest.main()

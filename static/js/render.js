@@ -3,7 +3,7 @@ import { state } from "./state.js";
 import { $ } from "./util.js";
 import { showError, trackNewPorts, trackUnitChanges, notifyUnitExits } from "./actions.js";
 import { renderUnitCards } from "./render-launchpad.js";
-import { renderProjectPorts, renderOtherPorts, renderProcs, renderNewPorts, renderTopPorts, renderResources } from "./render-monitor.js";
+import { renderProjectPorts, renderOtherPorts, renderProcs, renderNewPorts, renderTopPorts, renderResources, renderWatchedProcs, renderSpark } from "./render-monitor.js";
 
 export function renderSnapshot(snap) {
   state.snap = snap;
@@ -36,9 +36,11 @@ export function renderSnapshot(snap) {
 
   renderUnitCards();
   renderNewPorts(snap);
+  renderWatchedProcs(snap);
   renderProjectPorts(snap, projPorts);
   renderOtherPorts(snap);
   renderProcs(snap);
   renderTopPorts();
   renderResources();
+  renderSpark(snap.history);
 }
