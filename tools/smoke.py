@@ -119,8 +119,8 @@ def main():
         # ---- 静态资源 ----
         status, body = req("GET", "/", port)
         check("首页可达", status == 200 and b"<html" in body.lower(), "status=%s" % status)
-        status, body = req("GET", "/app.js", port)
-        check("app.js 可达", status == 200, "status=%s" % status)
+        status, body = req("GET", "/js/main.js", port)
+        check("前端模块入口可达", status == 200 and b"import" in body, "status=%s" % status)
         status, body = req("GET", "/style.css", port)
         check("style.css 可达", status == 200, "status=%s" % status)
         status, _ = req("GET", "/no-such-file.js", port)

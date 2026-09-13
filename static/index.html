@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>总控台</title>
 <link rel="stylesheet" href="style.css">
+<script>
+// 先于首帧应用上次使用的主题，避免深浅色闪烁（服务端设置加载后再校正）
+try {
+  var _t = localStorage.getItem("ops-theme");
+  if (_t) document.documentElement.dataset.theme = _t;
+} catch (e) {}
+</script>
 </head>
 <body>
 <aside class="rail">
@@ -347,6 +354,6 @@
   </div>
 </dialog>
 
-<script src="app.js"></script>
+<script type="module" src="js/main.js"></script>
 </body>
 </html>
