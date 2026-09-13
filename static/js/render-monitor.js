@@ -1,6 +1,6 @@
 // 服务监控：端口表 / 进程表 / 新端口提醒 / 侧栏榜单
 import { state } from "./state.js";
-import { $, esc, fmtMem, fmtUptime, STATUS_ZH, baseName, managedUnitForPid, applyHtml } from "./util.js";
+import { $, esc, fmtMem, fmtUptime, STATUS_ZH, baseName, httpUrlFor, isTcp, managedUnitForPid, applyHtml } from "./util.js";
 
 export const ORIGIN_ICONS = { bot: "🤖", code: "⌨", terminal: "▸", rocket: "🚀", server: "▦", package: "▣" };
 
@@ -26,10 +26,18 @@ export function renderProjectPorts(snap, projPorts) {
       ? '<button class="ghost act-log" data-id="' + esc(unit.id) + '" data-name="' + esc(unit.name) + '">日志</button>'
       : '<button class="ghost adopt-btn" data-pid="' + esc(p.pid) + '">加入启动台</button>' +
         '<button class="ghost ignore-port-btn" data-port="' + esc(p.addr.split(":")[1]) + '">忽略</button>';
+    // TCP 端口附加快捷操作：在浏览器打开 / 复制 URL
+    const url = isTcp(p) ? httpUrlFor(p.addr) : null;
+    const addrCell = '<td class="mono">' + esc(p.addr) +
+      (url
+        ? ' <button class="mini act-open-url" data-url="' + esc(url) + '" title="在浏览器打开">↗</button>' +
+          ' <button class="mini act-copy-url" data-url="' + esc(url) + '" title="复制 URL">⧉</button>'
+        : "") +
+      "</td>";
     return (
       "<tr>" +
       "<td>" + esc(p.proc || "（不可见）") + "</td>" +
-      '<td class="mono">' + esc(p.addr) + "</td>" +
+      addrCell +
       "<td>" + origin + "</td>" +
       "<td>" + originTag + "</td>" +
       '<td class="num">' + (proc ? proc.cpu : "—") + "</td>" +

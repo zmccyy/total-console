@@ -1,6 +1,6 @@
 // 启动台：单元卡片（按 key 增量调和）与过滤计数
 import { state } from "./state.js";
-import { $, esc, hashColor, fmtUptime, unitStatusZh, portForUnit, renderKeyed } from "./util.js";
+import { $, esc, hashColor, fmtUptime, unitStatusZh, portForUnit, httpUrlFor, isTcp, renderKeyed } from "./util.js";
 
 function unitIcon(u) {
   const letter = (u.name || "?").trim().charAt(0).toUpperCase();
@@ -13,9 +13,16 @@ function unitCard(u) {
   const port = running ? portForUnit(u.id) : null;
   const claimed = u.owned === "claimed";
   const healthBad = u.health && u.health.status === "error" && !running;
+  // TCP 端口可直接在浏览器打开；UDP 仅展示
+  const portChip = port
+    ? (isTcp(port)
+      ? '<button class="port-chip act-open-url" data-url="' + esc(httpUrlFor(port.addr)) +
+        '" title="在浏览器打开 ' + esc(httpUrlFor(port.addr)) + '">:' + esc(port.addr.split(":")[1]) + " ↗</button>"
+      : '<span class="port-chip">:' + esc(port.addr.split(":")[1]) + "</span>")
+    : "";
   const statusLine = running
     ? '<span class="status running">运行中</span>' + (claimed ? '<span class="tag claimed">已认领</span>' : "") +
-      (port ? '<span class="port-chip">:' + esc(port.addr.split(":")[1]) + "</span>" : "") +
+      portChip +
       '<span class="muted">PID ' + u.pid + " · " + fmtUptime(u.last_started_at) + "</span>"
     : u.status === "exited"
       ? '<span class="status exited">' + esc(unitStatusZh(u)) + "</span>"

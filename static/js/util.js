@@ -48,6 +48,23 @@ export function baseName(p) {
   return p.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
 }
 
+// 监听地址 → 可在浏览器打开的 URL。
+// "0.0.0.0:8000" → 127.0.0.1；IPv6（如 ":: :8000"）加方括号。
+export function httpUrlFor(addr) {
+  const s = String(addr || "");
+  const i = s.lastIndexOf(":");
+  const host = s.slice(0, i), port = s.slice(i + 1);
+  let h = host;
+  if (h.includes(":")) h = "[" + h + "]";
+  else if (h === "0.0.0.0") h = "127.0.0.1";
+  return "http://" + h + ":" + port;
+}
+
+// 仅 TCP 端口可在浏览器打开
+export function isTcp(port) {
+  return String(port && port.proto || "").toLowerCase() === "tcp";
+}
+
 export function switchView(name) {
   $$(".rail-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === "view-" + name));

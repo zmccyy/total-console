@@ -281,6 +281,25 @@ class ServerIntegrationTest(unittest.TestCase):
         _, data = self.request("GET", "/api/settings")
         self.assertFalse(json.loads(data)["notifications"])
 
+    # ---------- 端口一键打开 ----------
+
+    def test_open_url_calls_default_browser(self):
+        import unittest.mock as mock
+        opened = []
+        with mock.patch("os.startfile", side_effect=opened.append):
+            status, _ = self.request("POST", "/api/open-url",
+                                     body=json.dumps({"url": "http://127.0.0.1:8123/"}),
+                                     headers=self.auth_headers())
+        self.assertEqual(status, 200)
+        self.assertEqual(opened, ["http://127.0.0.1:8123/"])
+
+    def test_open_url_rejects_non_http_scheme(self):
+        for bad in ("file:///C:/Windows", "ms-settings:display", "javascript:alert(1)", ""):
+            status, _ = self.request("POST", "/api/open-url",
+                                     body=json.dumps({"url": bad}),
+                                     headers=self.auth_headers())
+            self.assertEqual(status, 400, bad)
+
 
 if __name__ == "__main__":
     unittest.main()

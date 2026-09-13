@@ -1,7 +1,7 @@
 // 事件绑定：全局点击分发、控件绑定、拖拽/键盘排序、快捷键
 import { api } from "./api.js";
 import { state } from "./state.js";
-import { $, $$, switchView } from "./util.js";
+import { $, $$, esc, switchView } from "./util.js";
 import { showError, setConn, refreshSnapshot, unitAction, ignorePort } from "./actions.js";
 import { clearFeed, pushFeed } from "./feed.js";
 import { applyTheme, nextTheme } from "./theme.js";
@@ -174,6 +174,23 @@ async function consoleAction(action, confirmText) {
 
 function handleClick(e) {
   const t = e.target;
+
+  const openUrl = t.closest(".act-open-url");
+  if (openUrl) {
+    // 交给本机默认浏览器打开（后端 os.startfile），不受弹窗拦截影响
+    api("/api/open-url", { method: "POST", body: { url: openUrl.dataset.url } })
+      .then(async (res) => { if (!res.ok) showError(await res.text()); })
+      .catch(() => showError("打开失败"));
+    return;
+  }
+
+  const copyUrl = t.closest(".act-copy-url");
+  if (copyUrl) {
+    navigator.clipboard.writeText(copyUrl.dataset.url)
+      .then(() => pushFeed("已复制地址 <b>" + esc(copyUrl.dataset.url) + "</b>"))
+      .catch(() => showError("复制失败"));
+    return;
+  }
 
   const rail = t.closest(".rail-btn");
   if (rail && rail.dataset.action === "logcenter") return openLogCenter();
