@@ -85,37 +85,57 @@ class Launchpad:
     # ---------- 变更 ----------
 
     def create_unit(self, name, kind, command, workdir="", order=None):
-        if kind not in ("service", "task"):
-            kind = "service"
-        unit = {
-            "id": uuid.uuid4().hex[:12],
-            "kind": kind,
-            "name": name,
-            "command": command,
-            "workdir": workdir or "",
-            "order": order if order is not None else len(self.config["units"]),
-            "status": "stopped",
-            "pid": None,
-            "start_time": None,
-            "exit_code": None,
-            "last_exit": None,
-            "run_token": None,
-            "owned": "managed",
-            "created_at": time.time(),
-            "last_started_at": None,
-        }
-        self.config["units"].append(unit)
-        self._save()
-        return dict(unit)
+        with store.CONFIG_LOCK:
+            if kind not in ("service", "task"):
+                kind = "service"
+            unit = {
+                "id": uuid.uuid4().hex[:12],
+                "kind": kind,
+                "name": name,
+                "command": command,
+                "workdir": workdir or "",
+                "order": order if order is not None else len(self.config["units"]),
+                "status": "stopped",
+                "pid": None,
+                "start_time": None,
+                "exit_code": None,
+                "last_exit": None,
+                "run_token": None,
+                "owned": "managed",
+                "created_at": time.time(),
+                "last_started_at": None,
+            }
+            self.config["units"].append(unit)
+            self._save()
+            return dict(unit)
+
+    def update_unit(self, unit_id, fields):
+        """编辑单元（运行中禁止），返回更新后的副本；字段缺失抛 ValueError。"""
+        with store.CONFIG_LOCK:
+            unit = self.get_unit(unit_id)
+            if unit["status"] == "running":
+                raise UnitBusyError("单元运行中，先停止再编辑")
+            name = str((fields or {}).get("name") or "").strip()
+            command = str((fields or {}).get("command") or "").strip()
+            if not name or not command:
+                raise ValueError("name 与 command 为必填")
+            unit["name"] = name
+            unit["command"] = command
+            unit["workdir"] = str((fields or {}).get("workdir") or "").strip()
+            if (fields or {}).get("kind") in ("service", "task"):
+                unit["kind"] = fields["kind"]
+            self._save()
+            return dict(unit)
 
     def reorder(self, ids):
         """按收到的 id 顺序重排（稳定排序：未涉及的 id 相对顺序不变，
         服务/任务两区可独立排序互不干扰）。"""
-        order = {i: n for n, i in enumerate(ids)}
-        self.config["units"].sort(key=lambda u: order.get(u["id"], u.get("order", len(order))))
-        for n, u in enumerate(self.config["units"]):
-            u["order"] = n
-        self._save()
+        with store.CONFIG_LOCK:
+            order = {i: n for n, i in enumerate(ids)}
+            self.config["units"].sort(key=lambda u: order.get(u["id"], u.get("order", len(order))))
+            for n, u in enumerate(self.config["units"]):
+                u["order"] = n
+            self._save()
 
     def claim(self, pid, name=None, kind="service", command="", workdir=None, unit_id=None):
         """把一个已在运行的当前用户进程认领为受管单元。
@@ -128,91 +148,98 @@ class Launchpad:
         pid = int(pid)
         if pid == psutil.Process().pid:
             raise ClaimError("不能认领总控台自身")
-        if not psutil.pid_exists(pid):
-            raise ClaimError("进程已不存在，无法认领")
-        for u in self.config["units"]:
-            if u["status"] == "running" and u["pid"] == pid \
-                    and (unit_id is None or u["id"] != unit_id):
-                raise ClaimError("该进程已被「%s」管理，不能重复认领" % u["name"])
-        try:
-            proc = psutil.Process(pid)
-            create_time = proc.create_time()
-            username = proc.username()
-            if workdir is None:
-                workdir = proc.cwd() or ""
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
-            raise ClaimError("无法读取进程信息，已取消认领：%s" % e)
-        if not _same_user(username):
-            raise ClaimError("该进程不属于当前用户，不能认领")
-        if unit_id is not None:
-            unit_ref = self.get_unit(unit_id)
-        else:
-            unit = self.create_unit(
-                name or ("pid-%d" % pid),
-                kind if kind in ("service", "task") else "service",
-                command or ("（外部进程，PID %d）" % pid),
-                workdir,
-            )
-            unit_ref = self.get_unit(unit["id"])
-        unit_ref["status"] = "running"
-        unit_ref["pid"] = pid
-        unit_ref["start_time"] = create_time
-        unit_ref["last_started_at"] = time.time()
-        unit_ref["owned"] = "claimed"
-        unit_ref["run_token"] = None
-        self._save()
-        return dict(unit_ref)
+        with store.CONFIG_LOCK:
+            if not psutil.pid_exists(pid):
+                raise ClaimError("进程已不存在，无法认领")
+            for u in self.config["units"]:
+                if u["status"] == "running" and u["pid"] == pid \
+                        and (unit_id is None or u["id"] != unit_id):
+                    raise ClaimError("该进程已被「%s」管理，不能重复认领" % u["name"])
+            try:
+                proc = psutil.Process(pid)
+                create_time = proc.create_time()
+                username = proc.username()
+                if workdir is None:
+                    workdir = proc.cwd() or ""
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
+                raise ClaimError("无法读取进程信息，已取消认领：%s" % e)
+            if not _same_user(username):
+                raise ClaimError("该进程不属于当前用户，不能认领")
+            if unit_id is not None:
+                unit_ref = self.get_unit(unit_id)
+            else:
+                unit = self.create_unit(
+                    name or ("pid-%d" % pid),
+                    kind if kind in ("service", "task") else "service",
+                    command or ("（外部进程，PID %d）" % pid),
+                    workdir,
+                )
+                unit_ref = self.get_unit(unit["id"])
+            unit_ref["status"] = "running"
+            unit_ref["pid"] = pid
+            unit_ref["start_time"] = create_time
+            unit_ref["last_started_at"] = time.time()
+            unit_ref["owned"] = "claimed"
+            unit_ref["run_token"] = None
+            self._save()
+            return dict(unit_ref)
 
     def delete_unit(self, unit_id):
-        unit = self.get_unit(unit_id)
-        self.refresh()
-        if unit["status"] == "running":
-            raise UnitBusyError("单元正在运行，先停止再删除")
-        self.config["units"] = [u for u in self.config["units"] if u["id"] != unit_id]
-        self._procs.pop(unit_id, None)
-        self._save()
+        with store.CONFIG_LOCK:
+            unit = self.get_unit(unit_id)
+            self.refresh()
+            if unit["status"] == "running":
+                raise UnitBusyError("单元正在运行，先停止再删除")
+            self.config["units"] = [u for u in self.config["units"] if u["id"] != unit_id]
+            self._procs.pop(unit_id, None)
+            self._save()
 
     def start(self, unit_id):
-        self.refresh()
-        unit = self.get_unit(unit_id)
-        if unit["status"] == "running":
-            raise AlreadyRunningError("单元已在运行")
-        token = secrets.token_urlsafe(16)
-        log = self._open_log_append(unit_id)
-        log.write(("\n===== 启动 %s =====\n" % time.strftime("%Y-%m-%d %H:%M:%S")).encode("utf-8"))
-        log.flush()
-        # 运行令牌以 PowerShell 注释形式追加：命令行可校验归属，
-        # 溯源引擎据此把受管进程标记为「总控台」启动，且不影响执行语义。
-        script = "%s\n# %s%s" % (unit["command"], attribution.RUN_TOKEN_ARG_PREFIX, token)
-        cmd = [self._powershell, "-NoProfile", "-NonInteractive", "-Command", script]
-        try:
-            popen = subprocess.Popen(
-                cmd,
-                cwd=unit["workdir"] or None,
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                creationflags=CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
-            )
-        except OSError as e:
-            log.close()
-            raise Error("启动失败: %s" % e)
-        log.close()  # 子进程已继承句柄；关掉本端避免句柄泄漏
-        unit["pid"] = popen.pid
-        unit["status"] = "running"
-        unit["exit_code"] = None
-        unit["run_token"] = token
-        unit["owned"] = "managed"
-        unit["last_started_at"] = time.time()
-        try:
-            unit["start_time"] = psutil.Process(popen.pid).create_time()
-        except psutil.Error:
-            unit["start_time"] = None
-        self._procs[unit_id] = popen
-        self._save()
-        return dict(unit)
+        with store.CONFIG_LOCK:
+            self.refresh()
+            unit = self.get_unit(unit_id)
+            if unit["status"] == "running":
+                raise AlreadyRunningError("单元已在运行")
+            token = secrets.token_urlsafe(16)
+            log = self._open_log_append(unit_id)
+            log.write(("\n===== 启动 %s =====\n" % time.strftime("%Y-%m-%d %H:%M:%S")).encode("utf-8"))
+            log.flush()
+            # 运行令牌以 PowerShell 注释形式追加：命令行可校验归属，
+            # 溯源引擎据此把受管进程标记为「总控台」启动，且不影响执行语义。
+            script = "%s\n# %s%s" % (unit["command"], attribution.RUN_TOKEN_ARG_PREFIX, token)
+            cmd = [self._powershell, "-NoProfile", "-NonInteractive", "-Command", script]
+            try:
+                popen = subprocess.Popen(
+                    cmd,
+                    cwd=unit["workdir"] or None,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    creationflags=CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
+                )
+            except OSError as e:
+                log.close()
+                raise Error("启动失败: %s" % e)
+            log.close()  # 子进程已继承句柄；关掉本端避免句柄泄漏
+            unit["pid"] = popen.pid
+            unit["status"] = "running"
+            unit["exit_code"] = None
+            unit["run_token"] = token
+            unit["owned"] = "managed"
+            unit["last_started_at"] = time.time()
+            try:
+                unit["start_time"] = psutil.Process(popen.pid).create_time()
+            except psutil.Error:
+                unit["start_time"] = None
+            self._procs[unit_id] = popen
+            self._save()
+            return dict(unit)
 
     def stop(self, unit_id):
+        with store.CONFIG_LOCK:
+            return self._stop_locked(unit_id)
+
+    def _stop_locked(self, unit_id):
         unit = self.get_unit(unit_id)
         if unit["pid"] is None:
             unit["status"] = "stopped"
@@ -246,10 +273,20 @@ class Launchpad:
         if cmdline is not None and not _same_user(username):
             raise StopRejectedError(
                 "PID %d 不属于当前用户，拒绝终止" % unit["pid"])
-        subprocess.run(
+        result = subprocess.run(
             ["taskkill", "/PID", str(unit["pid"]), "/T", "/F"],
             capture_output=True, timeout=_KILL_TIMEOUT,
         )
+        if result.returncode != 0:
+            # taskkill 失败：进程可能恰好自行退出了——确认后按已消失处理，
+            # 确认还活着则如实报错，不再静默当作已停止
+            if psutil.pid_exists(unit["pid"]):
+                detail = (result.stderr or b"").decode("utf-8", "replace").strip()
+                raise Error("终止 PID %d 失败：%s" % (
+                    unit["pid"], detail or "taskkill 返回码 %d" % result.returncode))
+            self._mark_gone(unit)
+            self._save()
+            return dict(unit)
         popen = self._procs.pop(unit_id, None)
         if popen is not None:
             popen.poll()  # 回收退出状态，避免 Popen 残留告警
@@ -269,23 +306,24 @@ class Launchpad:
     # ---------- 状态调和 ----------
 
     def refresh(self):
-        dirty = False
-        for unit in self.config["units"]:
-            popen = self._procs.get(unit["id"])
-            if popen is not None and popen.poll() is not None:
-                unit["status"] = "exited"
-                unit["exit_code"] = popen.returncode
-                unit["last_exit"] = self._exit_record(unit, popen.returncode)
-                unit["pid"] = None
-                unit["start_time"] = None
-                del self._procs[unit["id"]]
-                dirty = True
-            elif unit["status"] == "running" and unit["pid"] is not None \
-                    and not psutil.pid_exists(unit["pid"]):
-                self._mark_gone(unit)
-                dirty = True
-        if dirty:
-            self._save()
+        with store.CONFIG_LOCK:
+            dirty = False
+            for unit in self.config["units"]:
+                popen = self._procs.get(unit["id"])
+                if popen is not None and popen.poll() is not None:
+                    unit["status"] = "exited"
+                    unit["exit_code"] = popen.returncode
+                    unit["last_exit"] = self._exit_record(unit, popen.returncode)
+                    unit["pid"] = None
+                    unit["start_time"] = None
+                    del self._procs[unit["id"]]
+                    dirty = True
+                elif unit["status"] == "running" and unit["pid"] is not None \
+                        and not psutil.pid_exists(unit["pid"]):
+                    self._mark_gone(unit)
+                    dirty = True
+            if dirty:
+                self._save()
 
     def _exit_record(self, unit, code):
         started = unit.get("last_started_at")

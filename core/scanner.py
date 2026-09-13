@@ -296,10 +296,3 @@ def get_proc_context(pid):
 
 def _truncate(text, limit=_TRUNCATE_LEN):
     return text[:limit]
-
-
-def snapshot():
-    return _DEFAULT.snapshot()
-
-
-_DEFAULT = Snapshotter()

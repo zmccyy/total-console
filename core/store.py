@@ -95,7 +95,10 @@ def load_config(data_dir_path=None) -> dict:
     return cfg
 
 
-_SAVE_LOCK = threading.Lock()
+# 配置读写锁：进程内所有「改配置 + 落盘」的临界区共用（RLock 允许嵌套，
+# 如 Launchpad.start持锁后调用 save_config）。快照循环、请求线程、
+# 盘点线程都可能触碰 config，避免 json.dump 序列化时结构被并发修改。
+CONFIG_LOCK = threading.RLock()
 
 
 def save_config(data_dir_path=None, config: dict = None):
@@ -104,7 +107,7 @@ def save_config(data_dir_path=None, config: dict = None):
     d = Path(data_dir_path) if data_dir_path else data_dir()
     d.mkdir(parents=True, exist_ok=True)
     path = d / CONFIG_FILENAME
-    with _SAVE_LOCK:
+    with CONFIG_LOCK:
         # 写前留一份上一版配置，误操作可手动回滚
         if path.exists():
             try:

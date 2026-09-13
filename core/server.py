@@ -1,6 +1,9 @@
 """总控台 — Windows 本地运维控制台服务端（单用户、仅回环）。
 
 用法: python server.py [--port 9600] [--no-browser] [--data-dir PATH]
+
+本模块只保留 HTTP 骨架（Host/令牌/Origin 鉴权、路由分发、静态文件）
+与应用状态编排（快照、SSE、盘点、设置）。API 路由按域注册在 core/api/。
 """
 import argparse
 import json
@@ -15,19 +18,13 @@ import time
 import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
 import psutil
 
-from core import attribution, diagnose, inventory, launchpad, scanner, security, store
+from core import api, attribution, diagnose, inventory, launchpad, scanner, security, store
+from core.meta import (APP_MARKER, DEFAULT_PORT, PORT_TRIES, REGISTRY_PATH,
+                       ROOT_DIR, STATIC_DIR, VERSION)
 
-VERSION = "0.2.0"
-APP_MARKER = "total-console"
-DEFAULT_PORT = 9600
-PORT_TRIES = 10
-ROOT_DIR = Path(__file__).resolve().parent.parent
-REGISTRY_PATH = ROOT_DIR / "registry" / "agent-tools.json"
-STATIC_DIR = ROOT_DIR / "static"
 HEALTH_TTL = 30          # 运行前健康检查缓存秒数
 ORIGIN_TTL = 60          # 进程溯源缓存秒数
 BASELINE_MAX_AGE = 14 * 86400  # 端口基线保留天数
@@ -77,6 +74,7 @@ class _OpsApp:
         self.latest_snapshot = None
         self.inventory_cache = None
         self.inventory_scanning = False
+        self._inventory_started_at = 0.0
         self._health_cache = {}   # unit_id -> (fingerprint, ts, result)
         self._origin_cache = {}   # pid -> (ts, {"label","icon"})
         self._subscribers = set()
@@ -93,6 +91,29 @@ class _OpsApp:
     def save_config(self):
         store.save_config(self.data_dir, self.config)
 
+    def update_settings(self, body):
+        """校验并应用设置变更，落盘后返回最新 settings；非法值抛 ValueError。"""
+        if not isinstance(body, dict):
+            raise ValueError("JSON 格式错误")
+        with store.CONFIG_LOCK:
+            settings = self.settings
+            if isinstance(body.get("scan_roots"), list):
+                settings["scan_roots"] = [str(x) for x in body["scan_roots"] if str(x).strip()]
+            if "poll_interval" in body:
+                try:
+                    value = max(1, min(300, int(body["poll_interval"])))
+                except (TypeError, ValueError):
+                    raise ValueError("poll_interval 必须为整数")
+                settings["poll_interval"] = value
+            if isinstance(body.get("theme"), str):
+                settings["theme"] = body["theme"] if body["theme"] in ("light", "dark", "system") else "system"
+            if isinstance(body.get("ignored_ports"), list):
+                settings["ignored_ports"] = [str(x) for x in body["ignored_ports"]]
+            if "notifications" in body:
+                settings["notifications"] = bool(body["notifications"])
+            self.save_config()
+            return settings
+
     # ----- 扫描循环 -----
 
     def _tick_loop(self):
@@ -108,14 +129,16 @@ class _OpsApp:
             try:
                 self.launchpad.refresh()
             except Exception:
-                pass
+                import traceback
+                traceback.print_exc(file=sys.stderr)
             self._finalize_snapshot(snap)
             self.latest_snapshot = snap
             self.broadcast("snapshot", snap)
             try:
-                interval = max(1, int(self.settings.get("poll_interval", 5)))
+                interval = max(1, int(self.settings.get(
+                    "poll_interval", store.DEFAULT_POLL_INTERVAL)))
             except (TypeError, ValueError):
-                interval = 5
+                interval = store.DEFAULT_POLL_INTERVAL
             time.sleep(interval)
 
     def _finalize_snapshot(self, snap):
@@ -124,9 +147,13 @@ class _OpsApp:
         snap["units"] = [self._unit_with_health(u) for u in units]
         snap["poll_interval"] = self.settings.get("poll_interval", store.DEFAULT_POLL_INTERVAL)
         try:
-            if self.inventory_cache is None:
+            cache = self.inventory_cache
+            if cache is None:
                 # 盘点可能要遍历整个扫描根（家目录可能很大），绝不能阻塞快照：
                 # 首帧只做异步预热，盘点就绪前端口一律归为「其他」
+                self.refresh_inventory_async()
+            elif cache.get("error") and time.time() - self._inventory_started_at > 60:
+                # 盘点失败后每分钟静默重试一次，避免后台线程崩溃循环
                 self.refresh_inventory_async()
         except Exception:
             pass
@@ -216,29 +243,30 @@ class _OpsApp:
     def _apply_port_baseline(self, snap):
         """持久化端口基线：首次快照播种；此后新出现且非本控制台管理的
         端口标 isNew，供前端做「发现新端口」提醒。只在基线真正变化时落盘。"""
-        baseline = self.config.setdefault("port_baseline", {})
-        now = time.time()
-        seeded = bool(baseline)
-        addrs = set()
-        changed = False
-        for port in snap.get("ports", []):
-            addr = port.get("addr")
-            if not addr:
-                continue
-            addrs.add(addr)
-            if addr not in baseline:
-                baseline[addr] = now
+        with store.CONFIG_LOCK:
+            baseline = self.config.setdefault("port_baseline", {})
+            now = time.time()
+            seeded = bool(baseline)
+            addrs = set()
+            changed = False
+            for port in snap.get("ports", []):
+                addr = port.get("addr")
+                if not addr:
+                    continue
+                addrs.add(addr)
+                if addr not in baseline:
+                    baseline[addr] = now
+                    changed = True
+                    port["isNew"] = seeded and port.get("origin") != "managed"
+                else:
+                    port["isNew"] = False
+            stale = [a for a, ts in baseline.items() if a not in addrs
+                     and now - ts > BASELINE_MAX_AGE]
+            for a in stale:
+                del baseline[a]
                 changed = True
-                port["isNew"] = seeded and port.get("origin") != "managed"
-            else:
-                port["isNew"] = False
-        stale = [a for a, ts in baseline.items() if a not in addrs
-                 and now - ts > BASELINE_MAX_AGE]
-        for a in stale:
-            del baseline[a]
-            changed = True
-        if changed:
-            self.save_config()
+            if changed:
+                self.save_config()
 
     # ----- 诊断 / 健康 -----
 
@@ -282,7 +310,7 @@ class _OpsApp:
             latest = self.latest_snapshot
         if latest is None:
             # 首个订阅者：立即补一帧快照，避免等下一个 tick
-            threading.Thread(target=self._do_sync_snapshot, daemon=True).start()
+            threading.Thread(target=self.sync_snapshot, daemon=True).start()
         return q
 
     def unsubscribe(self, q):
@@ -302,7 +330,8 @@ class _OpsApp:
             except threading.QueueFull:
                 pass
 
-    def _do_sync_snapshot(self):
+    def sync_snapshot(self):
+        """同步取一帧全新快照（供 /api/snapshot 与首帧订阅者）。"""
         try:
             snap = self.snapshotters.snapshot()
         except Exception as e:
@@ -323,22 +352,34 @@ class _OpsApp:
         if self.inventory_scanning:
             return
         self.inventory_scanning = True
+        self._inventory_started_at = time.time()
         threading.Thread(target=self._build_inventory, daemon=True).start()
 
     def _build_inventory(self):
+        """构建盘点缓存。失败不再反复崩线程：缓存错误结果（前端可见），
+        由 _finalize_snapshot 定时重试。"""
         try:
             registry = inventory.load_registry(REGISTRY_PATH)
             agents = inventory.evaluate_agents(registry, inventory.LocalProbe())
             projects = inventory.scan_projects(self.settings.get("scan_roots") or [])
-            self.inventory_cache = {
+            result = {
                 "agents": agents,
                 "projects": projects,
                 "scan_roots": self.settings.get("scan_roots") or [],
                 "scanned_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
-            self.broadcast("inventory", self.inventory_cache)
-        finally:
-            self.inventory_scanning = False
+        except Exception as e:
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            result = {
+                "agents": [], "projects": [],
+                "scan_roots": self.settings.get("scan_roots") or [],
+                "scanned_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "error": "盘点失败: %s" % e,
+            }
+        self.inventory_cache = result
+        self.broadcast("inventory", result)
+        self.inventory_scanning = False
 
 
 class _OpsHandler(BaseHTTPRequestHandler):
@@ -379,54 +420,11 @@ class _OpsHandler(BaseHTTPRequestHandler):
             if not security.is_origin_allowed(self.headers.get("Origin"), port):
                 self._send(403, "Origin 不被允许")
                 return
-        # 3. 路由
+        # 3. 路由分发（core/api/ 注册表），未命中则静态文件兜底
         try:
-            if path == "/api/ping" and method == "GET":
-                return self._send_json(200, {"app": APP_MARKER, "name": "总控台",
-                                             "version": VERSION, "pid": os.getpid()})
-            if path == "/api/session" and method == "GET":
-                return self._send_json(200, {"token": app.token, "app": APP_MARKER,
-                                             "version": VERSION, "port": port})
-            if path == "/api/snapshot" and method == "GET":
-                # 原生批量扫描后整帧成本极低，直接取全新帧，避免秒级状态陈旧
-                app._do_sync_snapshot()
-                return self._send_json(200, app.latest_snapshot or {"ts": "", "procs": [],
-                                                                    "ports": [], "units": []})
-            if path == "/api/inventory" and method == "GET":
-                return self._send_json(200, app.get_inventory())
-            if path == "/api/inventory/refresh" and method == "POST":
-                app.refresh_inventory_async()
-                return self._send_json(202, {"status": "scanning"})
-            if path == "/api/settings" and method == "GET":
-                return self._send_json(200, app.settings)
-            if path == "/api/settings" and method == "PUT":
-                return self.handle_settings(app)
-            if path == "/api/cmdline" and method == "GET":
-                pid = query.get("pid", ["0"])[0]
-                return self._send_json(200, {"cmdline": scanner.get_cmdline(int(pid or 0))})
-            if path == "/api/proc-context" and method == "GET":
-                pid = query.get("pid", ["0"])[0]
-                return self._send_json(200, scanner.get_proc_context(int(pid or 0)))
-            if path == "/api/units" and method == "GET":
-                return self._send_json(200, app.launchpad.units())
-            if path == "/api/units" and method == "POST":
-                return self.handle_unit_create(app)
-            if path == "/api/units/reorder" and method == "POST":
-                return self.handle_units_reorder(app)
-            if path == "/api/console/restart" and method == "POST":
-                app.spawn_replacement(port)
-                app.schedule_shutdown(0.6)
-                return self._send_json(200, {"status": "restarting"})
-            if path == "/api/console/stop" and method == "POST":
-                app.schedule_shutdown(0.4)
-                return self._send_json(200, {"status": "stopping"})
-            if path == "/api/stream" and method == "GET":
-                return self.handle_stream(app)
-            if path.startswith("/api/logs/") and method == "GET":
-                unit_id = path.split("/")[3]
-                return self.handle_logs(app, unit_id)
-            if path.startswith("/api/units/"):
-                return self.handle_unit_action(app, path, method)
+            handler, params = api.match(method, path)
+            if handler is not None:
+                return handler(api.ApiContext(self, app, port, params, query))
             if method == "GET":
                 return self.handle_static(path)
             self._send(404, "Not Found")
@@ -435,169 +433,7 @@ class _OpsHandler(BaseHTTPRequestHandler):
             traceback.print_exc(file=sys.stderr)
             self._send(500, "服务器内部错误: %s" % e)
 
-    # ----- API 处理 -----
-
-    def handle_units_reorder(self, app):
-        body = self._read_json()
-        if body is None:
-            return self._send(400, "JSON 格式错误")
-        ids = body.get("ids")
-        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
-            return self._send(400, "ids 必须为字符串数组")
-        app.launchpad.reorder(ids)
-        return self._send_json(200, {"ok": True})
-
-    def handle_settings(self, app):
-        body = self._read_json()
-        if body is None:
-            return self._send(400, "JSON 格式错误")
-        settings = app.settings
-        if isinstance(body.get("scan_roots"), list):
-            settings["scan_roots"] = [str(x) for x in body["scan_roots"] if str(x).strip()]
-        if "poll_interval" in body:
-            try:
-                value = max(1, min(300, int(body["poll_interval"])))
-            except (TypeError, ValueError):
-                return self._send(400, "poll_interval 必须为整数")
-            settings["poll_interval"] = value
-        if isinstance(body.get("theme"), str):
-            settings["theme"] = body["theme"] if body["theme"] in ("light", "dark", "system") else "system"
-        if isinstance(body.get("ignored_ports"), list):
-            settings["ignored_ports"] = [str(x) for x in body["ignored_ports"]]
-        if "notifications" in body:
-            settings["notifications"] = bool(body["notifications"])
-        app.save_config()
-        return self._send_json(200, settings)
-
-    def handle_unit_create(self, app):
-        body = self._read_json()
-        if body is None:
-            return self._send(400, "JSON 格式错误")
-        name = str(body.get("name") or "").strip()
-        command = str(body.get("command") or "").strip()
-        if not name or not command:
-            return self._send(400, "name 与 command 为必填")
-        kind = body.get("kind") if body.get("kind") in ("service", "task") else "service"
-        workdir = str(body.get("workdir") or "").strip()
-        unit = app.launchpad.create_unit(name, kind, command, workdir)
-        return self._send_json(201, unit)
-
-    def handle_unit_action(self, app, path, method):
-        parts = path.split("/")  # ["", "api", "units", <id>, (action)]
-        unit_id = parts[3] if len(parts) > 3 else ""
-        action = parts[4] if len(parts) > 4 else ""
-        if method == "PUT" and len(parts) == 4:
-            return self.handle_unit_update(app, unit_id)
-        if method == "DELETE" and len(parts) == 4:
-            try:
-                app.launchpad.delete_unit(unit_id)
-            except launchpad.UnitNotFoundError:
-                return self._send(404, "单元不存在")
-            except launchpad.UnitBusyError as e:
-                return self._send(409, str(e))
-            return self._send(204, "")
-        if method == "GET" and action == "diagnose":
-            try:
-                return self._send_json(200, app.get_diagnosis(unit_id))
-            except launchpad.UnitNotFoundError:
-                return self._send(404, "单元不存在")
-        if method == "GET" and action == "health":
-            try:
-                unit = app.launchpad.get_unit(unit_id)
-            except launchpad.UnitNotFoundError:
-                return self._send(404, "单元不存在")
-            return self._send_json(200, diagnose.health(unit))
-        if method == "POST" and action == "claim":
-            body = self._read_json()
-            pid = body.get("pid") if isinstance(body, dict) else None
-            try:
-                pid = int(pid)
-            except (TypeError, ValueError):
-                return self._send(400, "pid 必须为整数")
-            try:
-                unit = app.launchpad.claim(
-                    pid, name=body.get("name"), kind=body.get("kind") or "service",
-                    command=body.get("command") or "", workdir=body.get("workdir"),
-                    unit_id=body.get("unit_id"),
-                )
-            except launchpad.ClaimError as e:
-                return self._send(409, str(e))
-            return self._send_json(201, unit)
-        if method == "POST" and action in ("start", "stop", "restart"):
-            try:
-                if action == "start":
-                    unit = app.launchpad.start(unit_id)
-                elif action == "stop":
-                    unit = app.launchpad.stop(unit_id)
-                else:
-                    unit = app.launchpad.restart(unit_id)
-            except launchpad.UnitNotFoundError:
-                return self._send(404, "单元不存在")
-            except launchpad.AlreadyRunningError as e:
-                return self._send(409, str(e))
-            except launchpad.StopRejectedError as e:
-                return self._send(409, str(e))
-            except launchpad.Error as e:
-                return self._send(500, str(e))
-            return self._send_json(200, unit)
-        return self._send(404, "Not Found")
-
-    def handle_unit_update(self, app, unit_id):
-        try:
-            unit = app.launchpad.get_unit(unit_id)
-        except launchpad.UnitNotFoundError:
-            return self._send(404, "单元不存在")
-        if unit["status"] == "running":
-            return self._send(409, "单元运行中，先停止再编辑")
-        body = self._read_json()
-        if body is None:
-            return self._send(400, "JSON 格式错误")
-        name = str(body.get("name") or "").strip()
-        command = str(body.get("command") or "").strip()
-        if not name or not command:
-            return self._send(400, "name 与 command 为必填")
-        unit["name"] = name
-        unit["command"] = command
-        unit["workdir"] = str(body.get("workdir") or "").strip()
-        if body.get("kind") in ("service", "task"):
-            unit["kind"] = body["kind"]
-        app.save_config()
-        return self._send_json(200, unit)
-
-    def handle_logs(self, app, unit_id):
-        try:
-            text = app.launchpad.log_tail(unit_id)
-        except launchpad.UnitNotFoundError:
-            return self._send(404, "单元不存在")
-        payload = text.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def handle_stream(self, app):
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Connection", "keep-alive")
-        self.end_headers()
-        q = app.subscribe()
-        try:
-            self.wfile.write(b"retry: 2000\n\n")
-            self.wfile.flush()
-            while True:
-                try:
-                    event, text = q.get(timeout=20)
-                    self.wfile.write(("event: %s\ndata: %s\n\n" % (event, text)).encode("utf-8"))
-                except threading.QueueEmpty:
-                    self.wfile.write(b": ping\n\n")
-                self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            pass
-        finally:
-            app.unsubscribe(q)
+    # ----- 静态文件 -----
 
     def handle_static(self, path):
         rel = "index.html" if path == "/" else path.lstrip("/")
@@ -616,31 +452,10 @@ class _OpsHandler(BaseHTTPRequestHandler):
 
     # ----- 工具 -----
 
-    def _read_json(self):
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            return None
-        if length <= 0:
-            return None
-        try:
-            return json.loads(self.rfile.read(length).decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return None
-
     def _send(self, status, text):
         payload = text.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def _send_json(self, status, obj):
-        payload = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()

@@ -129,7 +129,7 @@ def health(unit):
                     "系统 PATH 和工作目录里都找不到命令「%s」。" % first,
                     "确认该运行时已安装（如 node / python / pnpm），或改用完整路径。")
 
-    return {"status": "error" if issues else ("unknown" if tokens is None else "ok"),
+    return {"status": "error" if issues else "ok",
             "blocking": bool(issues), "issues": issues}
 
 
